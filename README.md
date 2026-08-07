@@ -4,9 +4,11 @@
 
 # Codex Status Bar
 
-A tiny native macOS menu-bar app that shows live Codex Desktop task state.
+A tiny native macOS menu-bar app that shows live Codex Desktop task state across local, SSH, and
+Remote Control connections.
 
-It watches Codex Desktop's local lifecycle event stream. There is no setup, account, helper process, or hook configuration.
+It reconciles Codex Desktop's own task catalog with lifecycle events. There is no account, helper
+process, or hook configuration; SSH monitoring uses host aliases already configured in Codex.
 
 <p align="center">
   <img src="assets/status-menu.png" width="420" alt="Codex Status Bar showing active Codex tasks and its timer, thinking words, launch-at-login, and completion-sound controls">
@@ -26,9 +28,9 @@ The original MIT copyright and license are preserved in [LICENSE](LICENSE), with
 
 | Area | Earlier Codex fork | This edition |
 | --- | --- | --- |
-| Codex surfaces | CLI and Desktop integration | Codex Desktop only |
-| Setup | Codex hooks and a bundled helper | No hooks, helper, account, or configuration |
-| Activity detection | Hook-driven status plus Desktop compatibility | Event-driven local Desktop lifecycle monitoring |
+| Codex surfaces | CLI and Desktop integration | Codex Desktop across local, SSH, and Remote Control connections |
+| Setup | Codex hooks and a bundled helper | No hooks, helper, account, or app-specific configuration |
+| Activity detection | Hook-driven status plus Desktop compatibility | Desktop task registry plus event-driven lifecycle monitoring |
 | Menu | Pet selection, animation, and mixed session rows | Exact task titles, thinking words, timer, sound, and clear active/recent groups |
 | Session list | Multiple Codex surfaces and workspace-oriented rows | Top-level user tasks only; internal runs, automations, CLI sessions, and helpers are filtered out |
 | Completed tasks | General idle-session retention | Five most recent completions for 15 minutes |
@@ -43,12 +45,25 @@ This is a substantial derivative, not an official successor. Upstream credit doe
 - A rotating Claude-style thinking word while Codex works (`Pondering…`, `Brewing…`, `Tinkering…`).
 - The full elapsed time of the current turn, including thinking and tool use.
 - A yellow indicator when Codex needs permission.
-- Independent **Thinking words** and **Show timer** toggles.
+- Independent **Thinking words** and **Show timer** toggles; **Show timer** applies to both the
+  menu-bar clock and active-task row clocks.
 - A completion sound after every turn by default, optionally limited to turns longer than 1, 5, or 15 minutes.
 - Automatic launch at login, with an in-app toggle.
-- Exact Codex task titles for every active or recently completed session.
+- Exact Codex task titles for active or recently completed sessions on local, SSH, and Remote
+  Control connections. SSH rows use the remote title index when available, otherwise a clear
+  `host · workspace` label.
 
-The app is local-only. It does not read message content, collect telemetry, use an API key, or require Node, npm, Bun, or another runtime. For Codex Desktop it watches file changes rather than repeatedly scanning the session tree, then inspects only lifecycle event names and session metadata.
+The app does not read message content, collect telemetry, use an API key, or require Node, npm, Bun,
+or another runtime. It reads Codex Desktop's local task catalog, lifecycle logs, and session metadata.
+While Codex is connected to a configured SSH machine, the app uses that existing alias in
+non-interactive mode to read lifecycle-only data from the remote `~/.codex` directory. Remote
+Control task identity and active/idle state come from Codex Desktop's local catalog and logs; the
+app does not connect directly to Remote Control hosts.
+
+SSH remotes must already support key-based login through their Codex alias. An SSH agent such as
+1Password may require a one-time approval for the status app's connection. Each attempt has a
+10-second timeout; after an authentication failure the app leaves that host alone until its next
+launch, so local monitoring continues without stuck workers or repeated approval prompts.
 
 ## Build and install
 
@@ -88,8 +103,16 @@ Move the app to `/Applications` or `~/Applications`, then open it once. It enabl
 - A session appears when Codex records its first real `task_started` lifecycle event. Merely opening a conversation does not add a row.
 - Every active task is shown, ordered by recent activity.
 - After completion or cancellation, up to five of the most recently completed tasks remain visible for 15 minutes.
-- Completed state files are removed after 15 minutes. Active states have a 12-hour safety timeout in case Codex exits without writing a terminal event.
-- Row names come from Codex's local task-title index. The workspace folder name is used only when the task has no indexed title.
+- Completed state files are removed after 15 minutes. Working states expire after 30 minutes without
+  a lifecycle update in case Codex exits without writing a terminal event.
+- Row names come from Codex Desktop's cross-host task catalog or task-title index. The workspace
+  folder name is used only when a task has no indexed title.
+- SSH remote sessions follow the same appearance, ordering, completion, and expiry rules as local
+  sessions. The desktop's remote-project assignment map distinguishes visible tasks from internal
+  helpers, including top-level tasks whose remote transcript source is labeled `subagent`. SSH
+  connections are multiplexed and attempted only while Codex Desktop is running.
+- Remote Control sessions are reconciled from Codex Desktop's local cross-host listing and
+  lifecycle logs, so they need no SSH alias or additional setup.
 
 ## Testing
 

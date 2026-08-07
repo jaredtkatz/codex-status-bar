@@ -1,10 +1,45 @@
 # Changelog
 
-## 0.4.4 - 2026-08-08
+## 0.4.7 — 2026-08-08
 
-- Changed the resting menu-bar spark to a native monochrome template icon so it matches the other macOS menu-bar icons in light and dark appearances.
+- Replaced five-times-per-second state-directory polling with filesystem notifications plus a
+  one-second safety refresh, preserving prompt task updates while eliminating idle scans.
+- Cached Codex's remote connection configuration and skipped SSH polling for hosts with no assigned
+  tasks; active SSH snapshots now use a five-second interval.
+- Consolidated Desktop log consumption into one incremental pass, cached log discovery, and reduced
+  catalog database refreshes from every five seconds to every 30 seconds.
+- Removed the repeated ServiceManagement XPC lookup from the five-second runtime heartbeat.
 
-## 0.4.3 - 2026-08-06
+## 0.4.6 — 2026-08-06
+
+- Backported Mick Cesanek's notification-driven Desktop-app detection from Claude Status Bar
+  0.4.4, eliminating ten full running-application enumerations per second while preserving an
+  immediate refresh when Codex launches.
+- Confirmed the other upstream CPU fixes are already native to this edition: title rendering is
+  change-gated, the static status icon is reused, and session JSON is reparsed only after its
+  modification time changes. Upstream animation-frame and transcript-tail caches do not apply
+  because this edition has neither animated pets nor transcript polling.
+
+## 0.4.5 — 2026-08-06
+
+- Reconcile the menu with Codex Desktop's cross-host task registry so genuinely active local, SSH,
+  and Remote Control tasks appear together, with no cap on active tasks.
+- Rediscover active local and SSH sessions whose rollout files originated on an older date.
+- Keep the five-task cap limited to completed history and retain automation/helper filtering.
+- Added live lifecycle monitoring for Codex Desktop threads running on configured SSH remote
+  machines, using Codex's existing host aliases, bounded authentication, and SSH multiplexing.
+- Use Codex Desktop's remote-project assignments—not the remote transcript's misleading source
+  label—to retain top-level delegated tasks while filtering unassigned internal helpers.
+- Made **Show timer** consistently control both the menu-bar clock and active-task row clocks.
+- Expire working markers after 30 minutes without lifecycle activity so interrupted turns cannot
+  remain under **Active tasks** for hours when Codex omits a cancellation event.
+
+## 0.4.4 — 2026-08-08
+
+- Changed the resting menu-bar spark to a native monochrome template icon so it matches the other
+  macOS menu-bar icons in light and dark appearances.
+
+## 0.4.3 — 2026-08-06
 
 - Added a current product screenshot and public issue/security guidance.
 - Updated GitHub Actions to their Node 24 releases.

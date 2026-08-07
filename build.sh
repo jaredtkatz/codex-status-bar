@@ -19,12 +19,12 @@ BUILD_ARCH="${BUILD_ARCH:-$(uname -m)}"
 case "$BUILD_ARCH" in
   arm64|x86_64)
     echo "Compiling native $BUILD_ARCH binary…"
-    swiftc -O -target "$BUILD_ARCH-apple-macos13.0" Sources/*.swift -o "$BIN" -framework Cocoa -framework ServiceManagement
+    swiftc -O -target "$BUILD_ARCH-apple-macos13.0" Sources/*.swift -o "$BIN" -framework Cocoa -framework ServiceManagement -lsqlite3
     ;;
   universal)
     echo "Compiling universal binary (arm64 + x86_64)…"
-    swiftc -O -target arm64-apple-macos13.0  Sources/*.swift -o "$BIN.arm64"  -framework Cocoa -framework ServiceManagement
-    swiftc -O -target x86_64-apple-macos13.0 Sources/*.swift -o "$BIN.x86_64" -framework Cocoa -framework ServiceManagement
+    swiftc -O -target arm64-apple-macos13.0  Sources/*.swift -o "$BIN.arm64"  -framework Cocoa -framework ServiceManagement -lsqlite3
+    swiftc -O -target x86_64-apple-macos13.0 Sources/*.swift -o "$BIN.x86_64" -framework Cocoa -framework ServiceManagement -lsqlite3
     lipo -create "$BIN.arm64" "$BIN.x86_64" -output "$BIN"
     rm -f "$BIN.arm64" "$BIN.x86_64"
     ;;

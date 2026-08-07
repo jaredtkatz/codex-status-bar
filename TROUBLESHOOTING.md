@@ -2,7 +2,10 @@
 
 ## Nothing changes while Codex works
 
-Confirm that Codex Status Bar is running and that Codex Desktop has created local sessions under `~/.codex/sessions`. The app does not support Codex CLI and does not install hooks.
+Confirm that Codex Status Bar and Codex Desktop are running. Local sessions need data under
+`~/.codex/sessions`; SSH connections must already work through their configured Codex alias.
+Remote Control state is read from Codex Desktop's local task registry and logs. The app does not
+support standalone Codex CLI tasks and does not install hooks.
 
 ## The app does not start after login
 

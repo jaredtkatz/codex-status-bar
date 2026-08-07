@@ -1,4 +1,5 @@
 import Cocoa
+import Darwin
 import ServiceManagement
 
 // Custom-drawn toggle. NSSwitch can't show its accent inside a menu (the menu's vibrant, non-key
@@ -238,7 +239,15 @@ final class StatusController: NSObject, NSMenuDelegate {
     let codexDesktopBundleID = "com.openai.codex"
 
     var pollTimer: Timer?
+    var stateWatcher: DispatchSourceFileSystemObject?
+    var pendingStateRefresh: DispatchWorkItem?
+    var terminationObserver: NSObjectProtocol?
+    var workspaceObservers: [NSObjectProtocol] = []
+    var nextHealthWrite: TimeInterval = 0
+    var desktopRunning = false
     let desktopMonitor = DesktopSessionMonitor()
+    let remoteMonitor = RemoteSessionMonitor()
+    let taskRegistryMonitor = DesktopTaskRegistryMonitor()
 
     struct Session {
         var id: String, state: String, label: String, project: String
@@ -310,9 +319,25 @@ final class StatusController: NSObject, NSMenuDelegate {
         menu.delegate = self
         statusItem.menu = menu
         render(label: "", labelStartedAt: 0)
-        let t = Timer(timeInterval: 0.2, repeats: true) { [weak self] _ in self?.tick() }
+        observeCodexDesktop()
+        try? FileManager.default.createDirectory(atPath: stateDir, withIntermediateDirectories: true)
+        startStateWatcher()
+        let t = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in self?.tick() }
+        t.tolerance = 0.15
         RunLoop.main.add(t, forMode: .common)
         pollTimer = t
+        terminationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.remoteMonitor.stop()
+            self.pendingStateRefresh?.cancel()
+            self.stateWatcher?.cancel()
+            for observer in self.workspaceObservers {
+                NSWorkspace.shared.notificationCenter.removeObserver(observer)
+            }
+            self.workspaceObservers.removeAll()
+        }
         tick()
         syncLaunchAtLogin()
     }
@@ -360,7 +385,7 @@ final class StatusController: NSObject, NSMenuDelegate {
         // tasks completed in the last 15 minutes. Opened-but-never-run conversations never appear.
         let eligible = sessions.values.filter { s in
             let eff = s.eff.isEmpty ? effectiveState(s, now: now) : s.eff
-            return s.threadSource == "user" && s.indexedTitle
+            return (s.threadSource == "user" || s.threadSource == "registry") && s.indexedTitle
                 && (s.started || eff == "permission" || StatusPolicy.isWorking(eff))
         }
         let active = eligible.filter { s in
@@ -383,7 +408,7 @@ final class StatusController: NSObject, NSMenuDelegate {
 
         if !active.isEmpty || !recent.isEmpty {
             menu.addItem(.separator())
-        } else if codexDesktopRunning() {
+        } else if desktopRunning {
             menu.addItem(header("Codex"))
             let open = NSMenuItem(title: "Open Codex", action: #selector(openCodex), keyEquivalent: "")
             open.target = self
@@ -490,7 +515,7 @@ final class StatusController: NSObject, NSMenuDelegate {
         // plus a live timer while working since the spinner can't convey elapsed.
         var line = truncated(sessionName(s))
         if !s.branch.isEmpty { line += " · " + truncated(s.branch, max: 22, keep: 20) }
-        if StatusPolicy.isWorking(eff), s.startedAt > 0 {
+        if StatusPolicy.shouldShowSessionTimer(showTimer: showTimer, state: eff, startedAt: s.startedAt) {
             line += "  " + elapsed(max(0, Int(now - s.startedAt)))
         }
         return line
@@ -511,14 +536,16 @@ final class StatusController: NSObject, NSMenuDelegate {
         // Generous cap: the row's pixel truncation does the real limiting now that the name field
         // sizes to the free space; this only guards against pathological strings.
         let nameMax = Int(cfg["nameMax"] ?? 30)
-        let working = StatusPolicy.isWorking(eff) && s.startedAt > 0
+        let showSessionTimer = StatusPolicy.shouldShowSessionTimer(
+            showTimer: showTimer, state: eff, startedAt: s.startedAt
+        )
         let resting = !(eff == "permission" || StatusPolicy.isWorking(eff))  // the dim caret
         v.configure(icon: sessionSymbol(s, eff: eff),
                     iconTint: resting ? .tertiaryLabelColor : .labelColor,  // caret dim; spinner matches the name font; amber image ignores tint
                     spinning: StatusPolicy.isWorking(eff),
                     name: truncated(sessionName(s), max: nameMax, keep: nameMax),
                     branch: truncated(s.branch, max: 22, keep: 20),
-                    timer: working ? elapsed(max(0, Int(now - s.startedAt))) : nil,
+                    timer: showSessionTimer ? elapsed(max(0, Int(now - s.startedAt))) : nil,
                     trailingInset: 12,
                     timerGap: CGFloat(cfg["timerGap"] ?? 10))
         // Truncated rows stay inspectable: full name, branch, and path on hover.
@@ -611,9 +638,79 @@ final class StatusController: NSObject, NSMenuDelegate {
 
     func tick() {
         desktopMonitor.poll()
+        remoteMonitor.poll(enabled: desktopRunning)
+        taskRegistryMonitor.poll(enabled: desktopRunning)
+        refreshSessionState()
+        writeRuntimeHealth()
+    }
+
+    func refreshSessionState() {
         reloadSessions()
         evaluate()
         if menuIsOpen { refreshOpenMenuRows() }
+    }
+
+    // State producers write atomically into state.d. Observe those writes so the visible status
+    // updates promptly without scanning the directory five times per second while nothing changes.
+    func startStateWatcher() {
+        guard stateWatcher == nil else { return }
+        let descriptor = Darwin.open(stateDir, O_EVTONLY)
+        guard descriptor >= 0 else { return }
+        let watcher = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: descriptor,
+            eventMask: [.write, .delete, .rename],
+            queue: .main
+        )
+        watcher.setEventHandler { [weak self] in
+            guard let self, let watcher = self.stateWatcher else { return }
+            let events = watcher.data
+            if events.contains(.delete) || events.contains(.rename) {
+                watcher.cancel()
+                self.stateWatcher = nil
+                try? FileManager.default.createDirectory(atPath: self.stateDir, withIntermediateDirectories: true)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                    self?.startStateWatcher()
+                }
+            }
+            self.scheduleStateRefresh()
+        }
+        watcher.setCancelHandler { Darwin.close(descriptor) }
+        watcher.resume()
+        stateWatcher = watcher
+    }
+
+    func scheduleStateRefresh() {
+        pendingStateRefresh?.cancel()
+        let refresh = DispatchWorkItem { [weak self] in
+            self?.pendingStateRefresh = nil
+            self?.refreshSessionState()
+        }
+        pendingStateRefresh = refresh
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.04, execute: refresh)
+    }
+
+    // A menu-only app has no ordinary window for external UI automation to inspect. Publish a
+    // small, non-sensitive heartbeat so diagnostics can distinguish a live, visible NSStatusItem
+    // from a stray process that never finished creating its menu-bar surface.
+    func writeRuntimeHealth(now: TimeInterval = Date().timeIntervalSince1970) {
+        guard now >= nextHealthWrite else { return }
+        nextHealthWrite = now + 5
+        let health: [String: Any] = [
+            "pid": Int(ProcessInfo.processInfo.processIdentifier),
+            "version": currentVersion,
+            "updatedAt": now,
+            "statusItemVisible": statusItem.isVisible,
+            "buttonAvailable": statusItem.button != nil,
+            "menuAttached": statusItem.menu != nil,
+            "codexDesktopRunning": desktopRunning,
+            // syncLaunchAtLogin and the toggle already reconcile SMAppService. Avoid another XPC
+            // round trip every heartbeat merely to serialize the same status.
+            "loginItemStatus": launchAtLogin ? "enabled" : "disabled",
+        ]
+        let root = (stateDir as NSString).deletingLastPathComponent
+        guard let data = try? JSONSerialization.data(withJSONObject: health, options: [.sortedKeys]) else { return }
+        let url = URL(fileURLWithPath: (root as NSString).appendingPathComponent("runtime.json"))
+        try? data.write(to: url, options: .atomic)
     }
 
     // The .json session files currently in state.d/ (ignores the .tmp files mid-write).
@@ -731,15 +828,29 @@ final class StatusController: NSObject, NSMenuDelegate {
 
     // Per-session effective state with an age cap so a missed event cannot animate forever.
     func effectiveState(_ s: Session, now: Double) -> String {
-        if StatusPolicy.isWorking(s.state) || s.state == "permission" {
-            if now - s.ts > StatusPolicy.activeSafetyCap { return "idle" }
-            return s.state
-        }
         return StatusPolicy.effectiveState(rawState: s.state, age: max(0, now - s.ts))
     }
 
-    func codexDesktopRunning() -> Bool {
-        NSWorkspace.shared.runningApplications.contains { $0.bundleIdentifier == codexDesktopBundleID }
+    // Query LaunchServices once, then follow workspace lifecycle notifications. The previous tick
+    // path enumerated all running apps twice every 200 ms even though Codex's state rarely changes.
+    func observeCodexDesktop() {
+        desktopRunning = !NSRunningApplication.runningApplications(
+            withBundleIdentifier: codexDesktopBundleID
+        ).isEmpty
+        let center = NSWorkspace.shared.notificationCenter
+        for (name, running) in [
+            (NSWorkspace.didLaunchApplicationNotification, true),
+            (NSWorkspace.didTerminateApplicationNotification, false),
+        ] {
+            let observer = center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+                guard let self,
+                      let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                      app.bundleIdentifier == self.codexDesktopBundleID else { return }
+                self.desktopRunning = running
+                if running { self.tick() }
+            }
+            workspaceObservers.append(observer)
+        }
     }
 
     func syncLaunchAtLogin() {

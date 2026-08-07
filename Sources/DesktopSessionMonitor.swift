@@ -23,6 +23,7 @@ final class DesktopSessionMonitor {
     private var fileWatchers: [String: DispatchSourceFileSystemObject] = [:]
     private var directoryWatchers: [String: DispatchSourceFileSystemObject] = [:]
     private var lastDirectoryRefresh: TimeInterval = 0
+    private var lastHistoricalRefresh: TimeInterval = 0
     private var nextRefreshRequest: TimeInterval = 0
     private let refreshRequestLock = NSLock()
     private let isoFractional: ISO8601DateFormatter = {
@@ -86,6 +87,28 @@ final class DesktopSessionMonitor {
             }
         }
         for directory in candidates { watchDirectory(directory) }
+        // A task can remain active for days or weeks after its rollout file was created. The
+        // date-bucket watchers above catch new work cheaply; this bounded modification-time scan
+        // reconnects old-origin tasks after app launch without reading old transcript contents.
+        if lastHistoricalRefresh == 0 || now - lastHistoricalRefresh >= 5 * 60 {
+            lastHistoricalRefresh = now
+            discoverRecentlyModifiedFiles(now: now)
+        }
+    }
+
+    private func discoverRecentlyModifiedFiles(now: TimeInterval) {
+        guard let enumerator = FileManager.default.enumerator(
+            at: sessionsRoot,
+            includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else { return }
+        let cutoff = Date(timeIntervalSince1970: now - StatusPolicy.activeInactivityTimeout - 5 * 60)
+        for case let url as URL in enumerator where url.pathExtension == "jsonl" {
+            guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .isRegularFileKey]),
+                  values.isRegularFile == true,
+                  (values.contentModificationDate ?? .distantPast) >= cutoff else { continue }
+            watchFile(url)
+        }
     }
 
     private func watchTitleIndex() {

@@ -71,6 +71,19 @@ struct DesktopSessionMonitorTests {
         guard result["pid"] as? Int == 4242 else { fatalError("Desktop host PID was not preserved") }
         guard StatusPolicy.recentSessionRetention == 900 else { fatalError("recent-session retention changed") }
         guard StatusPolicy.maximumRecentSessions == 5 else { fatalError("recent-session cap changed") }
+        guard StatusPolicy.effectiveState(rawState: "tool", age: 60) == "tool" else {
+            fatalError("fresh working state was expired")
+        }
+        guard StatusPolicy.effectiveState(
+            rawState: "tool", age: StatusPolicy.activeInactivityTimeout + 1
+        ) == "idle" else {
+            fatalError("stale working state was not expired")
+        }
+        guard StatusPolicy.shouldShowSessionTimer(showTimer: true, state: "thinking", startedAt: 1),
+              !StatusPolicy.shouldShowSessionTimer(showTimer: false, state: "thinking", startedAt: 1),
+              !StatusPolicy.shouldShowSessionTimer(showTimer: true, state: "idle", startedAt: 1) else {
+            fatalError("session timer did not follow the Show timer preference")
+        }
         let renamed = "{\"id\":\"\(sessionID)\",\"thread_name\":\"Renamed Thread\"}\n"
         try Data(renamed.utf8).write(to: titleIndex)
         let renameDeadline = Date().addingTimeInterval(0.75)
@@ -80,8 +93,154 @@ struct DesktopSessionMonitorTests {
         guard readState(state)?["project"] as? String == "Renamed Thread" else {
             fatalError("thread rename was not propagated within 750 ms")
         }
+
+        // Old-origin tasks must be rediscovered from their current modification time, not only
+        // from today's date bucket. This models a July task that is still active in August.
+        let oldSessions = root.appendingPathComponent("old-sessions")
+        let oldDay = oldSessions.appendingPathComponent("2026/07/15", isDirectory: true)
+        let oldStates = root.appendingPathComponent("old-states")
+        try fm.createDirectory(at: oldDay, withIntermediateDirectories: true)
+        let oldID = "old-origin-local-active"
+        let oldLog = oldDay.appendingPathComponent("rollout-2026-07-15T00-00-00-(oldID).jsonl")
+        let oldLifecycle = """
+        {"timestamp":"2026-08-06T12:00:00.123Z","type":"session_meta","payload":{"id":"\(oldID)","cwd":"/tmp/old","thread_source":"user"}}
+        {"timestamp":"2026-08-06T12:00:01.456Z","type":"event_msg","payload":{"type":"task_started","turn_id":"old-active-turn"}}
+
+        """
+        try Data(oldLifecycle.utf8).write(to: oldLog)
+        try fm.setAttributes([.modificationDate: now], ofItemAtPath: oldLog.path)
+        let oldIndex = root.appendingPathComponent("old-session-index.jsonl")
+        try Data("{\"id\":\"\(oldID)\",\"thread_name\":\"Long-running July task\"}\n".utf8).write(to: oldIndex)
+        let oldMonitor = DesktopSessionMonitor(
+            sessionsRoot: oldSessions, stateRoot: oldStates, titleIndexURL: oldIndex, pidProvider: { 4242 }
+        )
+        oldMonitor.poll(now: now.timeIntervalSince1970)
+        let oldState = oldStates.appendingPathComponent(oldID + ".json")
+        waitUntil(oldState, state: "thinking")
+        guard readState(oldState)?["project"] as? String == "Long-running July task" else {
+            fatalError("old-origin active local task was not rediscovered with its exact title")
+        }
+
+        let remoteGlobalState = root.appendingPathComponent("global-state.json")
+        let remoteStates = root.appendingPathComponent("remote-states")
+        let remoteID = "019fd2bf-c246-7ec2-bd10-06c1a303f036"
+        let remoteConfig: [String: Any] = [
+            "codex-managed-remote-connections": [[
+                "hostId": "remote-ssh-discovered:fallback",
+                "displayName": "Fallback", "alias": "fallback",
+            ]],
+            "thread-project-assignments": [remoteID: [
+                "projectKind": "remote", "hostId": "remote-ssh-discovered:fallback",
+            ]],
+        ]
+        try JSONSerialization.data(withJSONObject: remoteConfig).write(to: remoteGlobalState)
+        let remoteSnapshot = """
+        __CODEX_STATUS_INDEX__
+        {"id":"\(remoteID)","thread_name":"Remote validator maintenance"}
+        __CODEX_STATUS_SESSIONS__
+        __CODEX_STATUS_FILE__/home/nuck/.codex/sessions/2026/08/06/rollout-test-\(remoteID).jsonl
+        {"timestamp":"2026-08-06T12:00:00.123Z","type":"session_meta","payload":{"id":"\(remoteID)","cwd":"/home/nuck/staking","thread_source":"subagent"}}
+        {"timestamp":"2026-08-06T12:00:01.456Z","type":"event_msg","payload":{"type":"task_started","turn_id":"remote-turn"}}
+
+        """
+        let remoteMonitor = RemoteSessionMonitor(
+            globalStateURL: remoteGlobalState, stateRoot: remoteStates, pollInterval: 0,
+            snapshotProvider: { host in
+                guard host.alias == "fallback", host.label == "Fallback" else { return nil }
+                return Data(remoteSnapshot.utf8)
+            }
+        )
+        remoteMonitor.poll(enabled: true)
+        let remoteState = remoteStates.appendingPathComponent(remoteID + ".json")
+        let remoteDeadline = Date().addingTimeInterval(0.75)
+        while Date() < remoteDeadline, readState(remoteState)?["state"] as? String != "thinking" {
+            Thread.sleep(forTimeInterval: 0.01)
+        }
+        guard let remoteResult = readState(remoteState),
+              remoteResult["state"] as? String == "thinking",
+              remoteResult["project"] as? String == "Remote validator maintenance",
+              remoteResult["remoteHost"] as? String == "Fallback",
+              remoteResult["threadSource"] as? String == "subagent" else {
+            fatalError("SSH remote lifecycle state was not mirrored correctly")
+        }
+
+        // Codex Desktop's registry snapshot is the cross-host acceptance source. No active-task
+        // cap is applied: this exact set must surface local, SSH, and Remote Control together.
+        let registryStates = root.appendingPathComponent("registry-states")
+        let localRegistryID = "019fd200-3fee-7853-bcba-4619873a2079"
+        let sshRegistryID = "019fc3bd-0000-7000-8000-000000000001"
+        let controlRegistryID = "019f9a5f-0000-7000-8000-000000000002"
+        let registryTasks = [
+            DesktopTaskRegistryMonitor.Task(id: localRegistryID, hostID: "local", title: "CodexStatusBar", cwd: "/local"),
+            DesktopTaskRegistryMonitor.Task(id: sshRegistryID, hostID: "remote-ssh-discovered:validator", title: "Upgrade validator", cwd: "/ssh"),
+            DesktopTaskRegistryMonitor.Task(id: controlRegistryID, hostID: "remote-control:april", title: "My Wolves & Ally", cwd: "/control"),
+        ]
+        let registryMonitor = DesktopTaskRegistryMonitor(
+            databaseURL: root.appendingPathComponent("unused.db"),
+            logsRoot: root.appendingPathComponent("unused-logs"),
+            stateRoot: registryStates,
+            catalogProvider: { registryTasks },
+            snapshotProvider: {
+                DesktopTaskRegistryMonitor.Snapshot(
+                    observedAt: now.timeIntervalSince1970,
+                    statuses: [localRegistryID: "active", sshRegistryID: "active", controlRegistryID: "active"]
+                )
+            }
+        )
+        registryMonitor.poll(enabled: true, now: now.timeIntervalSince1970)
+        for id in [localRegistryID, sshRegistryID, controlRegistryID] {
+            waitUntil(registryStates.appendingPathComponent(id + ".json"), state: "thinking")
+        }
+        let stateFiles = try fm.contentsOfDirectory(at: registryStates, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "json" }
+        guard Set(stateFiles.map { $0.deletingPathExtension().lastPathComponent })
+                == Set([localRegistryID, sshRegistryID, controlRegistryID]) else {
+            fatalError("exact live three-task registry acceptance set did not match")
+        }
+        guard readState(registryStates.appendingPathComponent(sshRegistryID + ".json"))?["remoteHost"] as? String == "validator",
+              readState(registryStates.appendingPathComponent(controlRegistryID + ".json"))?["remoteHost"] as? String == "Remote Control" else {
+            fatalError("SSH and Remote Control surfaces were not labeled correctly")
+        }
+
+        // Exercise the real nested JSON shape written by Codex Desktop rather than relying only
+        // on the injected snapshot seam.
+        let logStates = root.appendingPathComponent("desktop-log-states")
+        let desktopLogs = root.appendingPathComponent("desktop-logs")
+        try fm.createDirectory(at: desktopLogs, withIntermediateDirectories: true)
+        let listing: [String: Any] = [
+            "schemaVersion": 4,
+            "pinnedThreads": [],
+            "threads": [[
+                "id": controlRegistryID, "kind": "codex", "status": "active",
+                "hostId": "remote-control:april", "cwd": "/control", "title": "My Wolves & Ally",
+            ]],
+        ]
+        let listingText = String(data: try JSONSerialization.data(withJSONObject: listing), encoding: .utf8)!
+        let response = ["contentItems": [["type": "inputText", "text": listingText]]]
+        let responseText = String(data: try JSONSerialization.data(withJSONObject: response), encoding: .utf8)!
+        let desktopLog = desktopLogs.appendingPathComponent("codex-desktop.log")
+        try Data("2026-08-06T12:00:00.000Z info test response=\(responseText)\n".utf8).write(to: desktopLog)
+        let logMonitor = DesktopTaskRegistryMonitor(
+            databaseURL: root.appendingPathComponent("unused-2.db"), logsRoot: desktopLogs,
+            stateRoot: logStates, catalogProvider: { [] }
+        )
+        logMonitor.poll(enabled: true, now: now.timeIntervalSince1970)
+        waitUntil(logStates.appendingPathComponent(controlRegistryID + ".json"), state: "thinking")
+        guard readState(logStates.appendingPathComponent(controlRegistryID + ".json"))?["project"] as? String == "My Wolves & Ally" else {
+            fatalError("Codex Desktop aggregate log task identity was not parsed")
+        }
         let latency = Date().timeIntervalSince(started)
         print(String(format: "DesktopSessionMonitorTests: event latency %.0f ms", latency * 1_000))
+    }
+
+    private static func waitUntil(_ url: URL, state: String) {
+        let deadline = Date().addingTimeInterval(0.75)
+        while Date() < deadline, readState(url)?["state"] as? String != state {
+            Thread.sleep(forTimeInterval: 0.01)
+        }
+        guard readState(url)?["state"] as? String == state else {
+            fatalError("timed out waiting for \(url.lastPathComponent) to become \(state)")
+        }
     }
 
     private static func readState(_ url: URL) -> [String: Any]? {
