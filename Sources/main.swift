@@ -279,7 +279,6 @@ final class StatusController: NSObject, NSMenuDelegate {
     var renderedDotKey = "unset"
     var renderedTitle = "\u{0}"
     let amber = NSColor(srgbRed: 0.95, green: 0.73, blue: 0.18, alpha: 1) // "awaiting permission" yellow dot
-    let claudeOrange = NSColor(srgbRed: 0.851, green: 0.467, blue: 0.341, alpha: 1)
     var showThinkingWords = true
     var showTimer = false
     var soundThreshold: Double = 0.1
@@ -770,7 +769,10 @@ final class StatusController: NSObject, NSMenuDelegate {
         startedAt = labelStartedAt
         let dotKey = dotColor == nil ? "none" : "permission"
         if renderedDotKey != dotKey {
-            button.contentTintColor = nil // we paint the icon color ourselves; template-tint is unreliable
+            // The resting mark is a template image, so AppKit automatically matches the
+            // other menu-bar icons in both light and dark appearances. Permission state
+            // is composited separately so its amber badge can remain colored.
+            button.contentTintColor = nil
             button.image = statusIcon(dotColor: dotColor)
             renderedDotKey = dotKey
             if button.image == nil { button.image = fallbackIcon() }
@@ -820,12 +822,12 @@ final class StatusController: NSObject, NSMenuDelegate {
         let side: CGFloat = 20
         guard let mask = claudeSparkMark else { return fallbackIcon() }
         let image = NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
-            self.claudeOrange.setFill()
+            NSColor.black.setFill()
             rect.fill()
             mask.draw(in: rect, from: .zero, operation: .destinationIn, fraction: 1)
             return true
         }
-        image.isTemplate = false
+        image.isTemplate = true
         return image
     }
 
@@ -842,7 +844,9 @@ final class StatusController: NSObject, NSMenuDelegate {
         let s: CGFloat = 20
         let d = max(4, (s * 0.3).rounded())
         let img = NSImage(size: NSSize(width: s, height: s), flipped: false) { rect in
-            base.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1)
+            NSColor.labelColor.setFill()
+            rect.fill()
+            base.draw(in: rect, from: .zero, operation: .destinationIn, fraction: 1)
             color.setFill()
             NSBezierPath(ovalIn: NSRect(x: s - d, y: 0, width: d, height: d)).fill()
             return true

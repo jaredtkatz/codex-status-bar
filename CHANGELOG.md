@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.4 - 2026-08-08
+
+- Changed the resting menu-bar spark to a native monochrome template icon so it matches the other macOS menu-bar icons in light and dark appearances.
+
 ## 0.4.3 - 2026-08-06
 
 - Added a current product screenshot and public issue/security guidance.
