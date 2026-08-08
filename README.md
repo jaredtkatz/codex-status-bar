@@ -39,6 +39,7 @@ This is a substantial derivative, not an official successor. Upstream credit doe
 
 ## What it shows
 
+- A monochrome spark that automatically matches the macOS menu bar in light and dark appearances.
 - A rotating Claude-style thinking word while Codex works (`Pondering…`, `Brewing…`, `Tinkering…`).
 - The full elapsed time of the current turn, including thinking and tool use.
 - A yellow indicator when Codex needs permission.
