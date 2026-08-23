@@ -229,6 +229,55 @@ struct DesktopSessionMonitorTests {
         guard readState(logStates.appendingPathComponent(controlRegistryID + ".json"))?["project"] as? String == "My Wolves & Ally" else {
             fatalError("Codex Desktop aggregate log task identity was not parsed")
         }
+
+        // Codex 0.149 no longer logs the schema-v4 aggregate payload. Exact titles still come from
+        // the catalog, while successful turn/start responses and terminal lifecycle lines carry
+        // enough lifecycle information to keep the menu mapped to Desktop.
+        let modernStates = root.appendingPathComponent("modern-log-states")
+        let modernLogs = root.appendingPathComponent("modern-logs")
+        try fm.createDirectory(at: modernLogs, withIntermediateDirectories: true)
+        let modernID = "01a02bf9-cf4b-7880-91b1-305db4fe8ddd"
+        let modernLog = modernLogs.appendingPathComponent("codex-desktop-modern.log")
+        let modernStart = "2026-08-06T12:00:02.456Z info [AppServerConnection] response_routed conversationId=\(modernID) errorCode=null method=turn/start\n"
+        try Data(modernStart.utf8).write(to: modernLog)
+        let modernTask = DesktopTaskRegistryMonitor.Task(
+            id: modernID, hostID: "remote-control:april", title: "Exact Mac app title",
+            cwd: "/remote", updatedAt: expectedTimestamp - 1
+        )
+        let modernMonitor = DesktopTaskRegistryMonitor(
+            databaseURL: root.appendingPathComponent("unused-3.db"), logsRoot: modernLogs,
+            stateRoot: modernStates, catalogProvider: { [modernTask] }
+        )
+        modernMonitor.poll(enabled: true, now: expectedTimestamp)
+        let modernState = modernStates.appendingPathComponent(modernID + ".json")
+        waitUntil(modernState, state: "thinking")
+        guard readState(modernState)?["project"] as? String == "Exact Mac app title" else {
+            fatalError("modern Desktop title did not match the catalog")
+        }
+        let modernComplete = "2026-08-06T12:00:03.456Z error Received turn/completed for unknown conversation conversationId=\(modernID)\n"
+        let modernHandle = try FileHandle(forWritingTo: modernLog)
+        try modernHandle.seekToEnd()
+        try modernHandle.write(contentsOf: Data(modernComplete.utf8))
+        try modernHandle.close()
+        modernMonitor.poll(enabled: true, now: expectedTimestamp + 2)
+        waitUntil(modernState, state: "done")
+
+        let catalogOnlyStates = root.appendingPathComponent("catalog-only-states")
+        let catalogOnlyID = "01a02c00-0000-7000-8000-000000000001"
+        let catalogOnlyMonitor = DesktopTaskRegistryMonitor(
+            databaseURL: root.appendingPathComponent("unused-4.db"), logsRoot: root.appendingPathComponent("none"),
+            stateRoot: catalogOnlyStates,
+            catalogProvider: { [DesktopTaskRegistryMonitor.Task(
+                id: catalogOnlyID, hostID: "local", title: "Renamed exactly in Codex",
+                cwd: "/local", updatedAt: expectedTimestamp - 2
+            )] }
+        )
+        catalogOnlyMonitor.poll(enabled: true, now: expectedTimestamp)
+        let catalogOnlyState = catalogOnlyStates.appendingPathComponent(catalogOnlyID + ".json")
+        waitUntil(catalogOnlyState, state: "done")
+        guard readState(catalogOnlyState)?["project"] as? String == "Renamed exactly in Codex" else {
+            fatalError("recent catalog title was not mirrored exactly")
+        }
         let latency = Date().timeIntervalSince(started)
         print(String(format: "DesktopSessionMonitorTests: event latency %.0f ms", latency * 1_000))
     }

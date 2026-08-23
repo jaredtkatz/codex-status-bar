@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.8 — 2026-08-22
+
+- Restored active and recently completed rows after Codex 0.149 removed the schema-v4 aggregate
+  thread snapshot from Desktop logs.
+- Reconciled every visible row against Codex Desktop's current catalog title so chat renames mirror
+  the Mac app exactly instead of retaining a stale title or workspace fallback.
+- Added current `turn/start` lifecycle parsing while retaining the older aggregate parser as a
+  compatibility fallback.
+
 ## 0.4.7 — 2026-08-08
 
 - Replaced five-times-per-second state-directory polling with filesystem notifications plus a

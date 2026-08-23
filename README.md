@@ -8,7 +8,8 @@ A tiny native macOS menu-bar app that shows live Codex Desktop task state across
 Remote Control connections.
 
 It reconciles Codex Desktop's own task catalog with lifecycle events. There is no account, helper
-process, or hook configuration; SSH monitoring uses host aliases already configured in Codex.
+process, or hook configuration; SSH monitoring uses host aliases already configured in Codex. Task
+names are copied from the same catalog Codex uses, so renaming a chat in Codex updates the menu row.
 
 <p align="center">
   <img src="assets/status-menu.png" width="420" alt="Codex Status Bar showing active Codex tasks and its timer, thinking words, launch-at-login, and completion-sound controls">
@@ -105,8 +106,8 @@ Move the app to `/Applications` or `~/Applications`, then open it once. It enabl
 - After completion or cancellation, up to five of the most recently completed tasks remain visible for 15 minutes.
 - Completed state files are removed after 15 minutes. Working states expire after 30 minutes without
   a lifecycle update in case Codex exits without writing a terminal event.
-- Row names come from Codex Desktop's cross-host task catalog or task-title index. The workspace
-  folder name is used only when a task has no indexed title.
+- Row names come from Codex Desktop's cross-host task catalog or task-title index. Recent catalog
+  changes are reconciled even when a Codex update changes its diagnostic log format.
 - SSH remote sessions follow the same appearance, ordering, completion, and expiry rules as local
   sessions. The desktop's remote-project assignment map distinguishes visible tasks from internal
   helpers, including top-level tasks whose remote transcript source is labeled `subagent`. SSH

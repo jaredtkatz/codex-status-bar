@@ -13,6 +13,15 @@ final class DesktopTaskRegistryMonitor {
         let hostID: String
         let title: String
         let cwd: String
+        let updatedAt: TimeInterval
+
+        init(id: String, hostID: String, title: String, cwd: String, updatedAt: TimeInterval = 0) {
+            self.id = id
+            self.hostID = hostID
+            self.title = title
+            self.cwd = cwd
+            self.updatedAt = updatedAt
+        }
     }
 
     struct Snapshot: Equatable {
@@ -42,6 +51,7 @@ final class DesktopTaskRegistryMonitor {
     private var catalog: [String: Task] = [:]
     private var catalogLoadedAt: TimeInterval = 0
     private var logOffsets: [String: UInt64] = [:]
+    private var pendingStates: [String: (state: String, timestamp: TimeInterval)] = [:]
     private var cachedLogFiles: [URL] = []
     private var logFilesLoadedAt: TimeInterval = 0
     private let iso = ISO8601DateFormatter()
@@ -78,6 +88,8 @@ final class DesktopTaskRegistryMonitor {
                 let tasks = self.customCatalogProvider?() ?? self.loadCatalog()
                 self.catalog = Dictionary(uniqueKeysWithValues: tasks.map { ($0.id, $0) })
                 self.catalogLoadedAt = now
+                self.reconcileCatalog(now: now)
+                self.applyPendingStates()
             }
             if let snapshot = self.customSnapshotProvider?() {
                 self.apply(snapshot: snapshot)
@@ -92,7 +104,7 @@ final class DesktopTaskRegistryMonitor {
               let database else { return [] }
         defer { sqlite3_close(database) }
         let sql = """
-        SELECT c.thread_id, c.host_id, c.display_title, c.cwd
+        SELECT c.thread_id, c.host_id, c.display_title, c.cwd, c.source_updated_at
         FROM local_thread_catalog c
         LEFT JOIN automation_runs a ON a.thread_id = c.thread_id
         WHERE c.missing_candidate = 0 AND a.thread_id IS NULL
@@ -108,7 +120,10 @@ final class DesktopTaskRegistryMonitor {
                 guard let value = sqlite3_column_text(statement, column) else { return "" }
                 return String(cString: value)
             }
-            let task = Task(id: text(0), hostID: text(1), title: text(2), cwd: text(3))
+            let task = Task(
+                id: text(0), hostID: text(1), title: text(2), cwd: text(3),
+                updatedAt: sqlite3_column_double(statement, 4)
+            )
             if !task.id.isEmpty, task.hostID == "local" || task.hostID.hasPrefix("remote-") {
                 tasks.append(task)
             }
@@ -201,17 +216,74 @@ final class DesktopTaskRegistryMonitor {
                    latestSnapshot == nil || snapshot.observedAt > latestSnapshot!.observedAt {
                     latestSnapshot = snapshot
                 }
-                guard let id = field("conversationId", in: line), let task = catalog[id],
-                      task.hostID.hasPrefix("remote-control:") else { continue }
+                guard let id = field("conversationId", in: line) else { continue }
                 let eventTime = timestamp(from: line) ?? Date().timeIntervalSince1970
-                if line.contains("Reasoning summary turn-start config resolved") {
-                    upsert(task: task, state: "thinking", timestamp: eventTime, preserveWorking: false)
-                } else if line.contains("IAB_LIFECYCLE ended browser use session activity") {
-                    finishIfOlder(task: task, timestamp: eventTime)
+                if line.contains("response_routed"), line.contains("method=turn/start"),
+                   line.contains("errorCode=null") {
+                    remember(id: id, state: "thinking", timestamp: eventTime)
+                } else if line.contains("Received turn/completed") {
+                    remember(id: id, state: "done", timestamp: eventTime)
                 }
             }
         }
         if let latestSnapshot { apply(snapshot: latestSnapshot) }
+    }
+
+    /// Codex 0.149 stopped logging the old schema-v4 aggregate `list_threads` payload. The catalog
+    /// remains the exact title source, and its source_updated_at supplies recent-history recency.
+    /// Reconcile that durable metadata with lifecycle edges from Desktop logs and rollout monitors
+    /// so title changes never depend on the retired aggregate log shape.
+    private func reconcileCatalog(now: TimeInterval) {
+        for task in catalog.values {
+            let url = stateURL(task.id)
+            guard let old = readState(url) else {
+                if task.updatedAt > 0, now - task.updatedAt <= StatusPolicy.recentSessionRetention {
+                    write(task: task, state: "done", timestamp: task.updatedAt, startedAt: 0)
+                }
+                continue
+            }
+            refreshMetadata(task: task, old: old, url: url)
+        }
+        pendingStates = pendingStates.filter { now - $0.value.timestamp <= StatusPolicy.activeInactivityTimeout }
+    }
+
+    private func remember(id: String, state: String, timestamp: TimeInterval) {
+        if let old = pendingStates[id], old.timestamp > timestamp { return }
+        pendingStates[id] = (state, timestamp)
+        guard let task = catalog[id] else { return }
+        applyPendingState(id: id, task: task)
+    }
+
+    private func applyPendingStates() {
+        for (id, task) in catalog where pendingStates[id] != nil {
+            applyPendingState(id: id, task: task)
+        }
+    }
+
+    private func applyPendingState(id: String, task: Task) {
+        guard let pending = pendingStates[id] else { return }
+        if pending.state == "thinking" {
+            upsert(task: task, state: "thinking", timestamp: pending.timestamp, preserveWorking: false)
+        } else {
+            finishIfOlder(task: task, timestamp: pending.timestamp)
+        }
+    }
+
+    private func refreshMetadata(task: Task, old: [String: Any], url: URL) {
+        let oldProject = old["project"] as? String ?? ""
+        let oldCwd = old["cwd"] as? String ?? ""
+        let oldHost = old["remoteHost"] as? String ?? ""
+        let host = hostLabel(task.hostID)
+        guard oldProject != task.title || oldCwd != task.cwd || oldHost != host
+                || old["indexedTitle"] as? Bool != true else { return }
+        var updated = old
+        updated["project"] = task.title
+        updated["cwd"] = task.cwd
+        updated["remoteHost"] = host
+        updated["indexedTitle"] = true
+        updated["threadSource"] = "registry"
+        guard let data = try? JSONSerialization.data(withJSONObject: updated, options: [.sortedKeys]) else { return }
+        try? data.write(to: url, options: .atomic)
     }
 
     private func upsert(task: Task, state: String, timestamp: TimeInterval, preserveWorking: Bool) {
@@ -240,10 +312,7 @@ final class DesktopTaskRegistryMonitor {
 
     private func write(task: Task, state: String, timestamp: TimeInterval, startedAt: TimeInterval) {
         try? FileManager.default.createDirectory(at: stateRoot, withIntermediateDirectories: true)
-        let hostLabel: String
-        if task.hostID == "local" { hostLabel = "" }
-        else if task.hostID.hasPrefix("remote-control:") { hostLabel = "Remote Control" }
-        else { hostLabel = String(task.hostID.split(separator: ":").last ?? "Remote") }
+        let hostLabel = hostLabel(task.hostID)
         let payload: [String: Any] = [
             "state": state, "label": state == "done" ? "Done" : "Thinking…",
             "project": task.title, "indexedTitle": true, "threadSource": "registry",
@@ -254,6 +323,12 @@ final class DesktopTaskRegistryMonitor {
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]) else { return }
         try? data.write(to: stateURL(task.id), options: .atomic)
+    }
+
+    private func hostLabel(_ hostID: String) -> String {
+        if hostID == "local" { return "" }
+        if hostID.hasPrefix("remote-control:") { return "Remote Control" }
+        return String(hostID.split(separator: ":").last ?? "Remote")
     }
 
     private func stateURL(_ id: String) -> URL {
