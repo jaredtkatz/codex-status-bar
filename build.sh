@@ -110,7 +110,7 @@ if [[ "${1:-}" == "--dmg" ]]; then
   echo "Packaging DMG…"
   DMG="build/CodexStatusBar.dmg"
   STAGE="build/dmg-stage"
-  rm -rf "$STAGE" "$DMG" build/rw.dmg
+  rm -rf "$STAGE" "$DMG" "$DMG.sha256" build/rw.dmg
   mkdir -p "$STAGE"
   cp -R "$APP" "$STAGE/"
   ln -s /Applications "$STAGE/Applications"
@@ -184,5 +184,7 @@ OSA
       echo "SKIP_NOTARIZE=1 — DMG signed but NOT notarized (layout test only)."
     fi
   fi
+  shasum -a 256 "$DMG" > "$DMG.sha256"
+  echo "Built checksum $DMG.sha256"
   echo "Built $DMG"
 fi

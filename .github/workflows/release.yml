@@ -13,14 +13,12 @@ jobs:
     runs-on: macos-14
     env:
       NOTARY_PROFILE: codex-statusbar
-      SIGNING_AVAILABLE: ${{ secrets.APPLE_CERTIFICATE_BASE64 != '' && secrets.APPLE_CERTIFICATE_PASSWORD != '' && secrets.APPLE_ID != '' && secrets.APPLE_TEAM_ID != '' && secrets.APPLE_APP_SPECIFIC_PASSWORD != '' }}
     steps:
       - uses: actions/checkout@v7
       - name: Test
         run: ./scripts/test.sh
 
       - name: Import signing certificate and notarization credentials
-        if: env.SIGNING_AVAILABLE == 'true'
         env:
           APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -50,23 +48,18 @@ jobs:
           rm -f "$certificate_path"
 
       - name: Build signed and notarized DMG
-        if: env.SIGNING_AVAILABLE == 'true'
         env:
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: BUILD_ARCH=universal ./build.sh --dmg
 
-      - name: Build ad-hoc-signed DMG
-        if: env.SIGNING_AVAILABLE != 'true'
-        run: |
-          echo "::warning::Apple signing secrets are incomplete; publishing an ad-hoc-signed DMG."
-          BUILD_ARCH=universal SKIP_NOTARIZE=1 ./build.sh --dmg
-
       - name: Remove temporary signing keychain
-        if: always() && env.SIGNING_AVAILABLE == 'true'
+        if: always()
         run: security delete-keychain "$NOTARY_KEYCHAIN" || true
 
       - name: Publish release
         uses: softprops/action-gh-release@v3
         with:
-          files: build/CodexStatusBar.dmg
+          files: |
+            build/CodexStatusBar.dmg
+            build/CodexStatusBar.dmg.sha256
           generate_release_notes: true

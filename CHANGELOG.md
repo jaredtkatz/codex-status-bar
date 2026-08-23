@@ -6,6 +6,9 @@
   deep link, including Remote Control tasks.
 - Added a lightweight wiggle animation to the monochrome status mark while a task is active, with
   automatic Reduce Motion support.
+- Published the universal DMG with Developer ID signing, Apple notarization, stapled tickets, and
+  a SHA-256 checksum. Future release jobs now fail instead of silently publishing an unsigned build
+  when signing credentials are unavailable.
 
 ## 0.4.9 — 2026-08-22
 

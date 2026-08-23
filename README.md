@@ -76,7 +76,8 @@ Requires macOS 13 or later.
 
 1. Download the latest `CodexStatusBar.dmg` from [Releases](https://github.com/nickxma/codex-status-bar/releases/latest).
 2. Drag **CodexStatusBar** into Applications.
-3. Open the app. Releases are signed and notarized when maintainer credentials are available; otherwise macOS may require you to right-click the app and choose **Open** once.
+3. Open the app. Official GitHub releases are signed with a Developer ID certificate and notarized
+   by Apple, so they pass Gatekeeper without a right-click workaround.
 
 Each release also includes `CodexStatusBar.dmg.sha256` for download verification.
 
@@ -97,7 +98,7 @@ For a DMG:
 ./build.sh --dmg
 ```
 
-Builds are native to the current Mac by default. A release runner with full Xcode can produce a universal binary with `BUILD_ARCH=universal ./build.sh --dmg`.
+Builds are native to the current Mac by default. A release runner with full Xcode can produce a universal binary with `BUILD_ARCH=universal ./build.sh --dmg`. Local builds without a Developer ID certificate remain ad-hoc signed and are intended for development only.
 
 Move the app to `/Applications` or `~/Applications`, then open it once. It enables **Launch at login** by default and remains as a lightweight menu-bar utility so it can notice Codex opening later.
 
