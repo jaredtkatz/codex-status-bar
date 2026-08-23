@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.9 — 2026-08-22
+
+- Simplified the menu to active tasks only. Completed and cancelled tasks disappear immediately,
+  while their lifecycle state remains available internally for completion sounds and cleanup.
+
 ## 0.4.8 — 2026-08-22
 
 - Restored active and recently completed rows after Codex 0.149 removed the schema-v4 aggregate

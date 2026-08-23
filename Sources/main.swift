@@ -381,8 +381,8 @@ final class StatusController: NSObject, NSMenuDelegate {
         menu.removeAllItems()
         sessionMenuItems.removeAll()
         let now = Date().timeIntervalSince1970
-        // A task appears only after real activity. Keep every active task, followed by at most five
-        // tasks completed in the last 15 minutes. Opened-but-never-run conversations never appear.
+        // A task appears only after real activity and remains visible only while active.
+        // Opened-but-never-run and completed conversations never appear.
         let eligible = sessions.values.filter { s in
             let eff = s.eff.isEmpty ? effectiveState(s, now: now) : s.eff
             return (s.threadSource == "user" || s.threadSource == "registry") && s.indexedTitle
@@ -390,23 +390,14 @@ final class StatusController: NSObject, NSMenuDelegate {
         }
         let active = eligible.filter { s in
             let eff = s.eff.isEmpty ? effectiveState(s, now: now) : s.eff
-            return eff == "permission" || StatusPolicy.isWorking(eff)
+            return StatusPolicy.shouldShowInMenu(eff)
         }.sorted { $0.ts > $1.ts }
-        let recent = eligible.filter { s in
-            let eff = s.eff.isEmpty ? effectiveState(s, now: now) : s.eff
-            return eff != "permission" && !StatusPolicy.isWorking(eff)
-                && now - s.ts <= StatusPolicy.recentSessionRetention
-        }.sorted { $0.ts > $1.ts }.prefix(StatusPolicy.maximumRecentSessions)
         if !active.isEmpty {
             menu.addItem(header("Active tasks"))
             addSessionRows(active, to: menu, now: now)
         }
-        if !recent.isEmpty {
-            menu.addItem(header("Recently completed"))
-            addSessionRows(Array(recent), to: menu, now: now)
-        }
 
-        if !active.isEmpty || !recent.isEmpty {
+        if !active.isEmpty {
             menu.addItem(.separator())
         } else if desktopRunning {
             menu.addItem(header("Codex"))

@@ -32,9 +32,9 @@ The original MIT copyright and license are preserved in [LICENSE](LICENSE), with
 | Codex surfaces | CLI and Desktop integration | Codex Desktop across local, SSH, and Remote Control connections |
 | Setup | Codex hooks and a bundled helper | No hooks, helper, account, or app-specific configuration |
 | Activity detection | Hook-driven status plus Desktop compatibility | Desktop task registry plus event-driven lifecycle monitoring |
-| Menu | Pet selection, animation, and mixed session rows | Exact task titles, thinking words, timer, sound, and clear active/recent groups |
+| Menu | Pet selection, animation, and mixed session rows | Exact active-task titles, thinking words, timer, and sound |
 | Session list | Multiple Codex surfaces and workspace-oriented rows | Top-level user tasks only; internal runs, automations, CLI sessions, and helpers are filtered out |
-| Completed tasks | General idle-session retention | Five most recent completions for 15 minutes |
+| Completed tasks | General idle-session retention | Hidden immediately; retained internally only for sound and cleanup |
 | Background behavior | Tied to Codex/session lifecycle | Lightweight login utility that is ready whenever Codex opens |
 | Distribution | Source-oriented fork | Tested universal DMG for Apple Silicon and Intel, built by GitHub Actions |
 
@@ -50,7 +50,7 @@ This is a substantial derivative, not an official successor. Upstream credit doe
   menu-bar clock and active-task row clocks.
 - A completion sound after every turn by default, optionally limited to turns longer than 1, 5, or 15 minutes.
 - Automatic launch at login, with an in-app toggle.
-- Exact Codex task titles for active or recently completed sessions on local, SSH, and Remote
+- Exact Codex task titles for active sessions on local, SSH, and Remote
   Control connections. SSH rows use the remote title index when available, otherwise a clear
   `host · workspace` label.
 
@@ -103,12 +103,12 @@ Move the app to `/Applications` or `~/Applications`, then open it once. It enabl
 
 - A session appears when Codex records its first real `task_started` lifecycle event. Merely opening a conversation does not add a row.
 - Every active task is shown, ordered by recent activity.
-- After completion or cancellation, up to five of the most recently completed tasks remain visible for 15 minutes.
-- Completed state files are removed after 15 minutes. Working states expire after 30 minutes without
+- Completed or cancelled tasks disappear from the menu immediately. Their state files are retained
+  internally for up to 15 minutes for completion sounds and cleanup. Working states expire after 30 minutes without
   a lifecycle update in case Codex exits without writing a terminal event.
 - Row names come from Codex Desktop's cross-host task catalog or task-title index. Recent catalog
   changes are reconciled even when a Codex update changes its diagnostic log format.
-- SSH remote sessions follow the same appearance, ordering, completion, and expiry rules as local
+- SSH remote sessions follow the same appearance, ordering, and expiry rules as local
   sessions. The desktop's remote-project assignment map distinguishes visible tasks from internal
   helpers, including top-level tasks whose remote transcript source is labeled `subagent`. SSH
   connections are multiplexed and attempted only while Codex Desktop is running.

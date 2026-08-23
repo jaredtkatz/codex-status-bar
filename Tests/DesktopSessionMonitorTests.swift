@@ -70,7 +70,12 @@ struct DesktopSessionMonitorTests {
         }
         guard result["pid"] as? Int == 4242 else { fatalError("Desktop host PID was not preserved") }
         guard StatusPolicy.recentSessionRetention == 900 else { fatalError("recent-session retention changed") }
-        guard StatusPolicy.maximumRecentSessions == 5 else { fatalError("recent-session cap changed") }
+        guard StatusPolicy.shouldShowInMenu("thinking"),
+              StatusPolicy.shouldShowInMenu("permission"),
+              !StatusPolicy.shouldShowInMenu("done"),
+              !StatusPolicy.shouldShowInMenu("idle") else {
+            fatalError("menu visibility was not limited to active tasks")
+        }
         guard StatusPolicy.effectiveState(rawState: "tool", age: 60) == "tool" else {
             fatalError("fresh working state was expired")
         }

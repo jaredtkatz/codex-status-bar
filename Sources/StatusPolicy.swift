@@ -6,10 +6,12 @@ enum StatusPolicy {
     // Stop presenting an old working marker as live after a generous period with no lifecycle
     // activity. Normal thinking/tool streams refresh `ts` continuously.
     static let activeInactivityTimeout: TimeInterval = 30 * 60
-    static let maximumRecentSessions = 5
-
     static func isWorking(_ state: String) -> Bool {
         state == "thinking" || state == "tool" || state == "subagent"
+    }
+
+    static func shouldShowInMenu(_ state: String) -> Bool {
+        state == "permission" || isWorking(state)
     }
 
     static func priority(of state: String) -> Int {
