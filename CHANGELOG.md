@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.0 — 2026-08-22
+
+- Made every active-task row open its exact conversation through Codex Desktop's native thread
+  deep link, including Remote Control tasks.
+- Added a lightweight wiggle animation to the monochrome status mark while a task is active, with
+  automatic Reduce Motion support.
+
 ## 0.4.9 — 2026-08-22
 
 - Simplified the menu to active tasks only. Completed and cancelled tasks disappear immediately,

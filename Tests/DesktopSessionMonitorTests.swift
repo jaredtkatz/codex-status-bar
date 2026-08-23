@@ -76,6 +76,18 @@ struct DesktopSessionMonitorTests {
               !StatusPolicy.shouldShowInMenu("idle") else {
             fatalError("menu visibility was not limited to active tasks")
         }
+        let threadID = "01a021ae-69a3-7e23-b919-26066111c0f6"
+        guard StatusPolicy.threadDeepLink(threadID: threadID)?.absoluteString
+                == "codex://threads/\(threadID)",
+              StatusPolicy.threadDeepLink(threadID: "not-a-thread") == nil else {
+            fatalError("Codex thread deep links were not built safely")
+        }
+        let firstIconPhase = StatusPolicy.activeIconPhase(frame: 0)
+        let wrappedIconPhase = StatusPolicy.activeIconPhase(frame: StatusPolicy.activeIconFrameCount)
+        guard firstIconPhase == wrappedIconPhase,
+              firstIconPhase != StatusPolicy.activeIconPhase(frame: 1) else {
+            fatalError("active icon animation did not form a moving loop")
+        }
         guard StatusPolicy.effectiveState(rawState: "tool", age: 60) == "tool" else {
             fatalError("fresh working state was expired")
         }

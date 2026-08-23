@@ -32,7 +32,7 @@ The original MIT copyright and license are preserved in [LICENSE](LICENSE), with
 | Codex surfaces | CLI and Desktop integration | Codex Desktop across local, SSH, and Remote Control connections |
 | Setup | Codex hooks and a bundled helper | No hooks, helper, account, or app-specific configuration |
 | Activity detection | Hook-driven status plus Desktop compatibility | Desktop task registry plus event-driven lifecycle monitoring |
-| Menu | Pet selection, animation, and mixed session rows | Exact active-task titles, thinking words, timer, and sound |
+| Menu | Pet selection, animation, and mixed session rows | Clickable active-task titles, an animated status mark, thinking words, timer, and sound |
 | Session list | Multiple Codex surfaces and workspace-oriented rows | Top-level user tasks only; internal runs, automations, CLI sessions, and helpers are filtered out |
 | Completed tasks | General idle-session retention | Hidden immediately; retained internally only for sound and cleanup |
 | Background behavior | Tied to Codex/session lifecycle | Lightweight login utility that is ready whenever Codex opens |
@@ -43,6 +43,7 @@ This is a substantial derivative, not an official successor. Upstream credit doe
 ## What it shows
 
 - A monochrome spark that automatically matches the macOS menu bar in light and dark appearances.
+- A subtle spark animation while any task is active; macOS Reduce Motion disables it automatically.
 - A rotating Claude-style thinking word while Codex works (`Pondering…`, `Brewing…`, `Tinkering…`).
 - The full elapsed time of the current turn, including thinking and tool use.
 - A yellow indicator when Codex needs permission.
@@ -53,6 +54,7 @@ This is a substantial derivative, not an official successor. Upstream credit doe
 - Exact Codex task titles for active sessions on local, SSH, and Remote
   Control connections. SSH rows use the remote title index when available, otherwise a clear
   `host · workspace` label.
+- Click any active task to open that exact conversation in Codex.
 
 The app does not read message content, collect telemetry, use an API key, or require Node, npm, Bun,
 or another runtime. It reads Codex Desktop's local task catalog, lifecycle logs, and session metadata.
@@ -103,6 +105,8 @@ Move the app to `/Applications` or `~/Applications`, then open it once. It enabl
 
 - A session appears when Codex records its first real `task_started` lifecycle event. Merely opening a conversation does not add a row.
 - Every active task is shown, ordered by recent activity.
+- Clicking an active task follows Codex's native `codex://threads/<thread-id>` route, including
+  Remote Control tasks whose host is resolved by Codex Desktop.
 - Completed or cancelled tasks disappear from the menu immediately. Their state files are retained
   internally for up to 15 minutes for completion sounds and cleanup. Working states expire after 30 minutes without
   a lifecycle update in case Codex exits without writing a terminal event.

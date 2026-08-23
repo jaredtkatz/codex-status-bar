@@ -239,6 +239,7 @@ final class StatusController: NSObject, NSMenuDelegate {
     let codexDesktopBundleID = "com.openai.codex"
 
     var pollTimer: Timer?
+    var iconAnimationTimer: Timer?
     var stateWatcher: DispatchSourceFileSystemObject?
     var pendingStateRefresh: DispatchWorkItem?
     var terminationObserver: NSObjectProtocol?
@@ -287,6 +288,8 @@ final class StatusController: NSObject, NSMenuDelegate {
     var startedAt: Double = 0  // unix seconds the current turn began (0 = no clock)
     var renderedDotKey = "unset"
     var renderedTitle = "\u{0}"
+    var activeIconFrame = 0
+    var activeIconDotColor: NSColor?
     let amber = NSColor(srgbRed: 0.95, green: 0.73, blue: 0.18, alpha: 1) // "awaiting permission" yellow dot
     var showThinkingWords = true
     var showTimer = false
@@ -331,6 +334,7 @@ final class StatusController: NSObject, NSMenuDelegate {
         ) { [weak self] _ in
             guard let self else { return }
             self.remoteMonitor.stop()
+            self.iconAnimationTimer?.invalidate()
             self.pendingStateRefresh?.cancel()
             self.stateWatcher?.cancel()
             for observer in self.workspaceObservers {
@@ -444,7 +448,10 @@ final class StatusController: NSObject, NSMenuDelegate {
         for s in rows {
             let eff = s.eff.isEmpty ? effectiveState(s, now: now) : s.eff
             let view = SessionRowView(id: s.id, width: CGFloat(uiConfig()["boxWidth"] ?? 300))
-            view.onClick = { [weak self] in menu.cancelTracking(); self?.openCodex() }
+            view.onClick = { [weak self] in
+                menu.cancelTracking()
+                self?.openCodexThread(threadID: s.id)
+            }
             configureSessionRow(view, s, eff: eff)
             let item = NSMenuItem()
             item.view = view
@@ -625,6 +632,14 @@ final class StatusController: NSObject, NSMenuDelegate {
         }
     }
 
+    func openCodexThread(threadID: String) {
+        guard let deepLink = StatusPolicy.threadDeepLink(threadID: threadID),
+              NSWorkspace.shared.open(deepLink) else {
+            openCodex()
+            return
+        }
+    }
+
     // MARK: state polling
 
     func tick() {
@@ -686,10 +701,16 @@ final class StatusController: NSObject, NSMenuDelegate {
     func writeRuntimeHealth(now: TimeInterval = Date().timeIntervalSince1970) {
         guard now >= nextHealthWrite else { return }
         nextHealthWrite = now + 5
+        let activeTaskCount = sessions.values.filter { session in
+            let state = session.eff.isEmpty ? effectiveState(session, now: now) : session.eff
+            return StatusPolicy.shouldShowInMenu(state)
+        }.count
         let health: [String: Any] = [
+            "activeTaskCount": activeTaskCount,
             "pid": Int(ProcessInfo.processInfo.processIdentifier),
             "version": currentVersion,
             "updatedAt": now,
+            "iconAnimating": iconAnimationTimer != nil,
             "statusItemVisible": statusItem.isVisible,
             "buttonAvailable": statusItem.button != nil,
             "menuAttached": statusItem.menu != nil,
@@ -803,9 +824,9 @@ final class StatusController: NSObject, NSMenuDelegate {
         guard let lead = lead else { renderResting(); return }
         switch lead.eff {
         case "permission":
-            render(label: statusText(lead, eff: lead.eff), labelStartedAt: 0, dotColor: amber)
+            render(label: statusText(lead, eff: lead.eff), labelStartedAt: 0, dotColor: amber, isActive: true)
         case "thinking", "tool", "subagent":
-            render(label: statusText(lead, eff: lead.eff), labelStartedAt: lead.startedAt)
+            render(label: statusText(lead, eff: lead.eff), labelStartedAt: lead.startedAt, isActive: true)
         case "done":
             render(label: statusText(lead, eff: lead.eff), labelStartedAt: 0)
         default:
@@ -865,21 +886,44 @@ final class StatusController: NSObject, NSMenuDelegate {
 
     // MARK: render
 
-    func render(label: String, labelStartedAt: Double, dotColor: NSColor? = nil) {
+    func render(label: String, labelStartedAt: Double, dotColor: NSColor? = nil, isActive: Bool = false) {
         guard let button = statusItem.button else { return }
         activeBase = label
         startedAt = labelStartedAt
-        let dotKey = dotColor == nil ? "none" : "permission"
-        if renderedDotKey != dotKey {
+        activeIconDotColor = dotColor
+        let shouldAnimate = isActive && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        let iconKey = "\(shouldAnimate ? "animated" : "static"):\(dotColor == nil ? "none" : "permission")"
+        if shouldAnimate {
+            if iconAnimationTimer == nil {
+                activeIconFrame = 0
+                let timer = Timer(timeInterval: 1.0 / 8.0, repeats: true) { [weak self] _ in
+                    self?.animateIconStep()
+                }
+                timer.tolerance = 0.02
+                RunLoop.main.add(timer, forMode: .common)
+                iconAnimationTimer = timer
+            }
+            if renderedDotKey != iconKey { animateIconStep() }
+        } else if renderedDotKey != iconKey {
+            iconAnimationTimer?.invalidate()
+            iconAnimationTimer = nil
             // The resting mark is a template image, so AppKit automatically matches the
             // other menu-bar icons in both light and dark appearances. Permission state
             // is composited separately so its amber badge can remain colored.
             button.contentTintColor = nil
             button.image = statusIcon(dotColor: dotColor)
-            renderedDotKey = dotKey
-            if button.image == nil { button.image = fallbackIcon() }
         }
+        renderedDotKey = iconKey
+        if button.image == nil { button.image = fallbackIcon() }
         applyTitle()
+    }
+
+    func animateIconStep() {
+        guard let button = statusItem.button else { return }
+        button.contentTintColor = nil
+        let frame = animatedSparkFrames[activeIconFrame]
+        button.image = activeIconDotColor.map { dotIcon(base: frame, color: $0) } ?? frame
+        activeIconFrame = (activeIconFrame + 1) % StatusPolicy.activeIconFrameCount
     }
 
     func applyTitle() {
@@ -913,6 +957,9 @@ final class StatusController: NSObject, NSMenuDelegate {
     }()
 
     lazy var claudeSparkMark: NSImage? = Data(base64Encoded: claudeLogoPNG).flatMap(NSImage.init(data:))
+    lazy var animatedSparkFrames: [NSImage] = (0..<StatusPolicy.activeIconFrameCount).map {
+        makeAnimatedSparkIcon(frame: $0)
+    }
 
     func statusIcon(dotColor: NSColor?) -> NSImage {
         let frame = claudeSparkIcon()
@@ -927,6 +974,25 @@ final class StatusController: NSObject, NSMenuDelegate {
             NSColor.black.setFill()
             rect.fill()
             mask.draw(in: rect, from: .zero, operation: .destinationIn, fraction: 1)
+            return true
+        }
+        image.isTemplate = true
+        return image
+    }
+
+    func makeAnimatedSparkIcon(frame: Int) -> NSImage {
+        let side: CGFloat = 20
+        let phase = StatusPolicy.activeIconPhase(frame: frame)
+        let base = claudeSparkIcon()
+        let image = NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
+            NSGraphicsContext.saveGraphicsState()
+            let transform = NSAffineTransform()
+            transform.translateX(by: rect.midX + CGFloat(phase.x), yBy: rect.midY + CGFloat(phase.y))
+            transform.rotate(byDegrees: CGFloat(phase.angleDegrees))
+            transform.translateX(by: -rect.midX, yBy: -rect.midY)
+            transform.concat()
+            base.draw(in: rect.insetBy(dx: 0.5, dy: 0.5), from: .zero, operation: .sourceOver, fraction: 1)
+            NSGraphicsContext.restoreGraphicsState()
             return true
         }
         image.isTemplate = true
