@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.1 — 2026-08-30
+
+- Made **Thinking words** off produce a genuinely icon-only menu-bar item while preserving state
+  text in row labels and tooltips.
+- Restored **Active** and **Recently completed** sections with a 15-minute default retention window
+  and no placeholder row when both sections are empty.
+- Added correctly sized **CODEX**, **CLAUDE**, and **CLI** origin pills to every session row.
+- Open Codex rows with `codex://threads/<thread-id>`, focus Claude Desktop rows, and raise the
+  originating terminal/editor for CLI rows.
+- Disabled self-update checks and clear inherited update-version caches without network access.
+- Bundled the patched Claude hook, including exact Codex title lookup from `session_index.jsonl`
+  and dead/stale state-file cleanup.
+
 ## 0.5.0 — 2026-08-22
 
 - Made every active-task row open its exact conversation through Codex Desktop's native thread

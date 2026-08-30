@@ -76,6 +76,18 @@ struct DesktopSessionMonitorTests {
               !StatusPolicy.shouldShowInMenu("idle") else {
             fatalError("menu visibility was not limited to active tasks")
         }
+        guard StatusPolicy.originTag(entrypoint: "", termProgram: "") == "CODEX",
+              StatusPolicy.originTag(entrypoint: "claude-desktop", termProgram: "") == "CLAUDE",
+              StatusPolicy.originTag(entrypoint: "cli", termProgram: "WarpTerminal") == "CLI" else {
+            fatalError("session origins were not classified correctly")
+        }
+        guard StatusPolicy.terminalApplication(termProgram: "WarpTerminal") == "Warp",
+              StatusPolicy.terminalApplication(termProgram: "Apple_Terminal") == "Terminal",
+              StatusPolicy.terminalApplication(termProgram: "iTerm.app") == "iTerm",
+              StatusPolicy.terminalApplication(termProgram: "vscode") == "Visual Studio Code",
+              StatusPolicy.terminalApplication(termProgram: "ghostty") == "ghostty" else {
+            fatalError("terminal application mapping changed")
+        }
         let threadID = "01a021ae-69a3-7e23-b919-26066111c0f6"
         guard StatusPolicy.threadDeepLink(threadID: threadID)?.absoluteString
                 == "codex://threads/\(threadID)",

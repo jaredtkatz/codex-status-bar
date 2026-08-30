@@ -16,6 +16,23 @@ enum StatusPolicy {
         state == "permission" || isWorking(state)
     }
 
+    static func originTag(entrypoint: String, termProgram: String) -> String {
+        if entrypoint.isEmpty && termProgram.isEmpty { return "CODEX" }
+        if entrypoint == "claude-desktop" { return "CLAUDE" }
+        return "CLI"
+    }
+
+    static func terminalApplication(termProgram: String) -> String? {
+        switch termProgram {
+        case "WarpTerminal": return "Warp"
+        case "Apple_Terminal": return "Terminal"
+        case "iTerm.app": return "iTerm"
+        case "vscode": return "Visual Studio Code"
+        case "": return nil
+        default: return termProgram
+        }
+    }
+
     static func threadDeepLink(threadID: String) -> URL? {
         guard UUID(uuidString: threadID) != nil else { return nil }
         var components = URLComponents()
