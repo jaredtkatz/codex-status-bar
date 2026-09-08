@@ -7,7 +7,7 @@
 A tiny native macOS menu-bar app that shows live Codex Desktop, Claude Desktop, and terminal task
 state.
 
-It reconciles Codex Desktop's own task catalog with lifecycle events and installs local Claude Code
+It reconciles Codex Desktop's own task catalog with live runtime status and lifecycle events and installs local Claude Code
 hooks without clobbering unrelated hooks. SSH monitoring uses host aliases already configured in
 Codex. Codex task names are copied from the same catalog Codex uses, so renaming a chat updates the
 menu row.
@@ -58,12 +58,14 @@ This is a substantial derivative, not an official successor. Upstream credit doe
 - Every row carries a **CODEX**, **CLAUDE**, or **CLI** origin pill. Clicking a Codex row opens that
   exact conversation; Claude Desktop and CLI rows focus their originating app.
 
-The app does not read message content, collect telemetry, or use an API key. It reads Codex
-Desktop's local task catalog, lifecycle logs, and session metadata. Its optional Claude Code rows use
+The app collects no telemetry and uses no API key. It reads Codex Desktop's local task catalog,
+lifecycle logs, and session metadata, and follows its local cross-window runtime-status stream.
+Stream frames can include conversation content; the app discards it and retains only status and
+revision metadata. Its optional Claude Code rows use
 local Node-based hooks installed into the existing Claude settings without replacing unrelated hooks.
 While Codex is connected to a configured SSH machine, the app uses that existing alias in
 non-interactive mode to read lifecycle-only data from the remote `~/.codex` directory. Remote
-Control task identity and active/idle state come from Codex Desktop's local catalog and logs; the
+Control task identity comes from Codex Desktop's local catalog and live status from its local stream; the
 app does not connect directly to Remote Control hosts.
 
 SSH remotes must already support key-based login through their Codex alias. An SSH agent such as
@@ -114,16 +116,19 @@ Move the app to `/Applications` or `~/Applications`, then open it once. It enabl
 - Clicking a Codex task follows `codex://threads/<thread-id>`, including Remote Control tasks whose
   host is resolved by Codex Desktop. Claude Desktop rows focus Claude; CLI rows raise the terminal
   or editor recorded in `TERM_PROGRAM`.
-- Working states expire after 30 minutes without a lifecycle update in case a producer exits without
-  writing a terminal event.
+- Live runtime status takes precedence over cached lifecycle state. Lost owners, missed stream
+  revisions, and unconfirmed registry-only activity appear under **Status unavailable**.
+- Lifecycle-only fallback states expire after 30 minutes without an update. File watchers are
+  reconciled periodically, and partial JSON lines remain buffered until complete.
 - Row names come from Codex Desktop's cross-host task catalog or task-title index. Recent catalog
   changes are reconciled even when a Codex update changes its diagnostic log format.
 - SSH remote sessions follow the same appearance, ordering, and expiry rules as local
   sessions. The desktop's remote-project assignment map distinguishes visible tasks from internal
   helpers, including top-level tasks whose remote transcript source is labeled `subagent`. SSH
   connections are multiplexed and attempted only while Codex Desktop is running.
-- Remote Control sessions are reconciled from Codex Desktop's local cross-host listing and
-  lifecycle logs, so they need no SSH alias or additional setup.
+- Remote Control sessions follow the same desktop runtime stream, so they need no SSH alias.
+  This local IPC protocol is versioned but internal to Codex. If a desktop update changes it,
+  unsupported live states are unavailable rather than guessed.
 
 ## Testing
 

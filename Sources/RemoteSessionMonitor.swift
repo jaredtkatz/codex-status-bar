@@ -310,8 +310,7 @@ final class RemoteSessionMonitor {
         try? FileManager.default.createDirectory(at: stateRoot, withIntermediateDirectories: true)
         let safeID = sessionID.map { $0.isLetter || $0.isNumber || "._-".contains($0) ? $0 : "_" }
         let url = stateRoot.appendingPathComponent(String(safeID) + ".json")
-        guard let data = try? JSONSerialization.data(withJSONObject: state, options: [.sortedKeys]) else { return }
-        try? data.write(to: url, options: .atomic)
+        CodexStateStore.write(state, to: url)
     }
 
     private func parse(_ line: String) -> [String: Any]? {

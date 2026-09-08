@@ -29,4 +29,4 @@ Tagged releases are signed and notarized when these GitHub Actions secrets are c
 - `APPLE_TEAM_ID`: the Apple Developer team ID
 - `APPLE_APP_SPECIFIC_PASSWORD`: an app-specific password for that Apple ID
 
-If any secret is missing, the release workflow builds an ad-hoc-signed DMG and emits a warning instead of claiming that the artifact is notarized.
+Official release builds require a Developer ID identity and successful notarization. Missing signing prerequisites fail the release; ad-hoc builds remain available only for local development.

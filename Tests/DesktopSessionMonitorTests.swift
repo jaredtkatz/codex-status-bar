@@ -303,9 +303,61 @@ struct DesktopSessionMonitorTests {
         )
         catalogOnlyMonitor.poll(enabled: true, now: expectedTimestamp)
         let catalogOnlyState = catalogOnlyStates.appendingPathComponent(catalogOnlyID + ".json")
-        waitUntil(catalogOnlyState, state: "done")
-        guard readState(catalogOnlyState)?["project"] as? String == "Renamed exactly in Codex" else {
-            fatalError("recent catalog title was not mirrored exactly")
+        Thread.sleep(forTimeInterval: 0.05)
+        guard readState(catalogOnlyState) == nil else {
+            fatalError("a catalog timestamp must not invent a completed turn")
+        }
+
+        // File notifications may split a completion event at any byte. Neither half alone is JSON.
+        let completion = "{\"timestamp\":\"2026-08-05T12:01:00.000Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"task_complete\",\"turn_id\":\"new-turn\"}}\n"
+        let split = completion.index(completion.startIndex, offsetBy: 47)
+        let partial = try FileHandle(forWritingTo: log)
+        try partial.seekToEnd()
+        try partial.write(contentsOf: Data(completion[..<split].utf8))
+        Thread.sleep(forTimeInterval: 0.05)
+        try partial.write(contentsOf: Data(completion[split...].utf8))
+        try partial.close()
+        waitUntil(state, state: "done")
+
+        // A producer replay (including same-time start) cannot resurrect a completed task.
+        let race = root.appendingPathComponent("race.json")
+        CodexStateStore.write(["state": "done", "ts": 100.0], to: race)
+        CodexStateStore.write(["state": "thinking", "ts": 99.0], to: race)
+        CodexStateStore.write(["state": "thinking", "ts": 100.0], to: race)
+        guard readState(race)?["state"] as? String == "done" else { fatalError("stale start replaced completion") }
+
+        try fm.removeItem(at: race)
+        CodexStateStore.write(["state": "thinking", "ts": 99.0], to: race)
+        guard !fm.fileExists(atPath: race.path) else { fatalError("pruned completion was resurrected") }
+
+        // Live IPC snapshots are authoritative even with paginated/empty transcript history.
+        let live = DesktopLiveStatusMonitor(socketURL: root.appendingPathComponent("missing.sock"))
+        func snapshot(_ id: String, _ type: String, revision: Int = 1) -> [String: Any] {
+            ["type": "broadcast", "method": "thread-stream-state-changed", "version": 11,
+             "sourceClientId": "owner", "params": ["conversationId": id, "hostId": "remote-control:test",
+             "change": ["type": "snapshot", "revision": revision,
+                        "conversationState": ["threadRuntimeStatus": ["type": type], "turns": []]]]]
+        }
+        live.handle(snapshot("remote", "active"))
+        live.handle(snapshot("local", "idle"))
+        guard live.state(for: "remote") == "thinking", live.state(for: "local") == "idle" else {
+            fatalError("live cross-host runtime states did not match")
+        }
+        live.handle(["type": "broadcast", "method": "thread-stream-state-changed", "version": 11,
+            "sourceClientId": "owner", "params": ["conversationId": "remote", "change": [
+                "type": "patches", "baseRevision": 1, "revision": 2,
+                "patches": [["op": "replace", "path": ["threadRuntimeStatus"], "value": ["type": "idle"]]]]]])
+        guard live.state(for: "remote") == "idle" else { fatalError("live completion did not clear active") }
+        live.handle(["type": "broadcast", "method": "thread-stream-state-changed", "version": 11,
+            "sourceClientId": "owner", "params": ["conversationId": "remote", "change": [
+                "type": "patches", "baseRevision": 4, "revision": 5, "patches": []]]])
+        guard live.state(for: "remote") == "unknown" else { fatalError("missing revisions were treated as live") }
+        live.handle(snapshot("remote", "active", revision: 6))
+        live.handle(["type": "broadcast", "method": "client-status-changed",
+                     "params": ["clientId": "owner", "status": "disconnected"]])
+        guard live.state(for: "remote") == "unknown" else { fatalError("lost owner was treated as active or completed") }
+        guard DesktopLiveStatusMonitor.runtimeState(["type": "active", "activeFlags": ["waitingOnApproval"]]) == "permission" else {
+            fatalError("approval state was lost")
         }
         let latency = Date().timeIntervalSince(started)
         print(String(format: "DesktopSessionMonitorTests: event latency %.0f ms", latency * 1_000))

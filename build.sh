@@ -81,6 +81,19 @@ if [[ -n "$TEAM_ID" ]]; then
 fi
 SIGN_ID="$(printf '%s\n' "$IDENTITIES" | head -1 | sed -E 's/.*"(.*)"/\1/')"
 
+# Tagged GitHub builds are official releases even when the workflow does not set a flag.
+if [[ "${GITHUB_ACTIONS:-}" == "true" && "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+  REQUIRE_SIGNING=1
+fi
+if [[ "${LOCAL_ADHOC:-}" == "1" ]]; then
+  SIGN_ID=""
+fi
+
+if [[ "${REQUIRE_SIGNING:-}" == "1" && ( -z "$SIGN_ID" || "${SKIP_NOTARIZE:-}" == "1" ) ]]; then
+  echo "Release requires Developer ID signing and notarization." >&2
+  exit 1
+fi
+
 # Strip extended attributes (Finder info, quarantine, etc.) that bundled resources can
 # carry — codesign rejects them ("resource fork, Finder information, ... not allowed").
 xattr -cr "$APP"
@@ -184,6 +197,12 @@ OSA
     else
       echo "SKIP_NOTARIZE=1 — DMG signed but NOT notarized (layout test only)."
     fi
+  fi
+  if [[ "${REQUIRE_SIGNING:-}" == "1" ]]; then
+    codesign --verify --deep --strict "$APP"
+    xcrun stapler validate "$APP"
+    xcrun stapler validate "$DMG"
+    spctl --assess --type execute "$APP"
   fi
   shasum -a 256 "$DMG" > "$DMG.sha256"
   echo "Built checksum $DMG.sha256"

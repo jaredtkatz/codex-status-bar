@@ -162,9 +162,9 @@ final class DesktopSessionMonitor {
 
     private func watchDirectory(_ url: URL) {
         let path = url.path
-        guard directoryWatchers[path] == nil,
-              FileManager.default.fileExists(atPath: path) else { return }
+        guard FileManager.default.fileExists(atPath: path) else { return }
         discoverFiles(in: url)
+        guard directoryWatchers[path] == nil else { return }
         let descriptor = Darwin.open(path, O_EVTONLY)
         guard descriptor >= 0 else { return }
         let source = DispatchSource.makeFileSystemObjectSource(
@@ -189,10 +189,10 @@ final class DesktopSessionMonitor {
 
     private func watchFile(_ url: URL) {
         let path = url.path
-        guard fileWatchers[path] == nil else { return }
         if let size = fileSize(url), size > 0 {
             consume(url: url, size: size)
         }
+        guard fileWatchers[path] == nil else { return }
         let descriptor = Darwin.open(path, O_EVTONLY)
         guard descriptor >= 0 else { return }
         let source = DispatchSource.makeFileSystemObjectSource(
@@ -207,6 +207,7 @@ final class DesktopSessionMonitor {
             if events.contains(.delete) || events.contains(.rename) {
                 source.cancel()
                 self.fileWatchers[path] = nil
+                self.cursors[path] = nil
                 return
             }
             if let size = self.fileSize(url), size > 0 {
@@ -226,6 +227,7 @@ final class DesktopSessionMonitor {
     private func consume(url: URL, size: UInt64) {
         let path = url.path
         var cursor = cursors[path] ?? initialCursor(url: url, size: size)
+        if size < cursor.offset { cursor = initialCursor(url: url, size: size) }
         guard size > cursor.offset, let handle = try? FileHandle(forReadingFrom: url) else {
             cursors[path] = cursor
             return
@@ -233,8 +235,13 @@ final class DesktopSessionMonitor {
         defer { try? handle.close() }
         try? handle.seek(toOffset: cursor.offset)
         guard let data = try? handle.readToEnd(), !data.isEmpty else { return }
-        cursor.offset = size
-        applyLines(data, to: &cursor, transcript: path)
+        // File notifications can arrive halfway through a JSON line. Keep the unfinished bytes
+        // unread so the next notification (or periodic reconciliation) parses the whole event.
+        if let end = data.lastIndex(of: 10) {
+            let complete = Data(data[...end])
+            cursor.offset += UInt64(complete.count)
+            applyLines(complete, to: &cursor, transcript: path)
+        }
         cursors[path] = cursor
     }
 
@@ -256,8 +263,12 @@ final class DesktopSessionMonitor {
         let start = size > window ? size - window : 0
         try? handle.seek(toOffset: start)
         if let data = try? handle.readToEnd() {
-            cursor.offset = size
-            applyLines(data, to: &cursor, transcript: url.path)
+            cursor.offset = start
+            if let end = data.lastIndex(of: 10) {
+                let complete = Data(data[...end])
+                cursor.offset += UInt64(complete.count)
+                applyLines(complete, to: &cursor, transcript: url.path)
+            }
         }
         return cursor
     }
@@ -331,8 +342,7 @@ final class DesktopSessionMonitor {
         try? FileManager.default.createDirectory(at: stateRoot, withIntermediateDirectories: true)
         let safeID = cursor.sessionID.map { $0.isLetter || $0.isNumber || "._-".contains($0) ? $0 : "_" }
         let url = stateRoot.appendingPathComponent(String(safeID) + ".json")
-        guard let data = try? JSONSerialization.data(withJSONObject: cursor.state, options: [.sortedKeys]) else { return }
-        try? data.write(to: url, options: .atomic)
+        CodexStateStore.write(cursor.state, to: url)
     }
 
     private func parse(_ line: String) -> [String: Any]? {

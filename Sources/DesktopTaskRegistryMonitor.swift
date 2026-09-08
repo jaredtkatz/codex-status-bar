@@ -48,12 +48,15 @@ final class DesktopTaskRegistryMonitor {
     private let lock = NSLock()
     private var pollInFlight = false
     private var nextPoll: TimeInterval = 0
+    private var observationTime: TimeInterval = 0
+    private var latestEventTimes: [String: TimeInterval] = [:]
     private var catalog: [String: Task] = [:]
     private var catalogLoadedAt: TimeInterval = 0
     private var logOffsets: [String: UInt64] = [:]
     private var pendingStates: [String: (state: String, timestamp: TimeInterval)] = [:]
     private var cachedLogFiles: [URL] = []
     private var logFilesLoadedAt: TimeInterval = 0
+    let liveMonitor: DesktopLiveStatusMonitor?
     private let iso = ISO8601DateFormatter()
 
     init(
@@ -64,13 +67,15 @@ final class DesktopTaskRegistryMonitor {
         stateRoot: URL = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".codex/statusbar/state.d", isDirectory: true),
         catalogProvider: CatalogProvider? = nil,
-        snapshotProvider: SnapshotProvider? = nil
+        snapshotProvider: SnapshotProvider? = nil,
+        liveMonitor: DesktopLiveStatusMonitor? = nil
     ) {
         self.databaseURL = databaseURL
         self.logsRoot = logsRoot
         self.stateRoot = stateRoot
         self.customCatalogProvider = catalogProvider
         self.customSnapshotProvider = snapshotProvider
+        self.liveMonitor = liveMonitor
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
     }
 
@@ -84,7 +89,8 @@ final class DesktopTaskRegistryMonitor {
         queue.async { [weak self] in
             guard let self else { return }
             defer { self.lock.lock(); self.pollInFlight = false; self.lock.unlock() }
-            if self.catalog.isEmpty || now - self.catalogLoadedAt >= 30 {
+            self.observationTime = now
+            if self.catalog.isEmpty || now - self.catalogLoadedAt >= 5 {
                 let tasks = self.customCatalogProvider?() ?? self.loadCatalog()
                 self.catalog = Dictionary(uniqueKeysWithValues: tasks.map { ($0.id, $0) })
                 self.catalogLoadedAt = now
@@ -95,6 +101,22 @@ final class DesktopTaskRegistryMonitor {
                 self.apply(snapshot: snapshot)
             }
             self.consumeDesktopLogs(self.currentLogFiles(now: now))
+            let candidates = self.catalog.values.filter { task in
+                if now - task.updatedAt <= 48 * 60 * 60 { return true }
+                guard let old = self.readState(self.stateURL(task.id)),
+                      let state = old["state"] as? String else { return false }
+                return StatusPolicy.shouldShowInMenu(state)
+            }
+            if let states = self.liveMonitor?.poll(tasks: candidates, now: now) {
+                for (id, state) in states {
+                    guard let task = self.catalog[id], state != "unknown" else { continue }
+                    if state == "idle" {
+                        self.finishIfOlder(task: task, timestamp: now)
+                    } else {
+                        self.upsert(task: task, state: state, timestamp: now, preserveWorking: true)
+                    }
+                }
+            }
         }
     }
 
@@ -237,9 +259,6 @@ final class DesktopTaskRegistryMonitor {
         for task in catalog.values {
             let url = stateURL(task.id)
             guard let old = readState(url) else {
-                if task.updatedAt > 0, now - task.updatedAt <= StatusPolicy.recentSessionRetention {
-                    write(task: task, state: "done", timestamp: task.updatedAt, startedAt: 0)
-                }
                 continue
             }
             refreshMetadata(task: task, old: old, url: url)
@@ -248,7 +267,9 @@ final class DesktopTaskRegistryMonitor {
     }
 
     private func remember(id: String, state: String, timestamp: TimeInterval) {
-        if let old = pendingStates[id], old.timestamp > timestamp { return }
+        if state == "thinking", observationTime - timestamp > StatusPolicy.activeInactivityTimeout { return }
+        if let old = latestEventTimes[id], old >= timestamp { return }
+        latestEventTimes[id] = timestamp
         pendingStates[id] = (state, timestamp)
         guard let task = catalog[id] else { return }
         applyPendingState(id: id, task: task)
@@ -262,6 +283,7 @@ final class DesktopTaskRegistryMonitor {
 
     private func applyPendingState(id: String, task: Task) {
         guard let pending = pendingStates[id] else { return }
+        pendingStates[id] = nil
         if pending.state == "thinking" {
             upsert(task: task, state: "thinking", timestamp: pending.timestamp, preserveWorking: false)
         } else {
@@ -282,8 +304,7 @@ final class DesktopTaskRegistryMonitor {
         updated["remoteHost"] = host
         updated["indexedTitle"] = true
         updated["threadSource"] = "registry"
-        guard let data = try? JSONSerialization.data(withJSONObject: updated, options: [.sortedKeys]) else { return }
-        try? data.write(to: url, options: .atomic)
+        CodexStateStore.write(updated, to: url)
     }
 
     private func upsert(task: Task, state: String, timestamp: TimeInterval, preserveWorking: Bool) {
@@ -321,8 +342,7 @@ final class DesktopTaskRegistryMonitor {
             "pid": 0, "started": true, "startedAt": startedAt, "ts": timestamp,
             "activeAgents": [String](), "tool": "",
         ]
-        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]) else { return }
-        try? data.write(to: stateURL(task.id), options: .atomic)
+        CodexStateStore.write(payload, to: stateURL(task.id))
     }
 
     private func hostLabel(_ hostID: String) -> String {

@@ -276,7 +276,7 @@ final class StatusController: NSObject, NSMenuDelegate {
     var desktopRunning = false
     let desktopMonitor = DesktopSessionMonitor()
     let remoteMonitor = RemoteSessionMonitor()
-    let taskRegistryMonitor = DesktopTaskRegistryMonitor()
+    let taskRegistryMonitor = DesktopTaskRegistryMonitor(liveMonitor: DesktopLiveStatusMonitor())
 
     struct Session {
         var id: String, state: String, label: String, project: String
@@ -284,6 +284,7 @@ final class StatusController: NSObject, NSMenuDelegate {
         var entrypoint: String
         var termProgram: String
         var pid: Int32
+        var hasTranscript: Bool
         var indexedTitle: Bool
         var threadSource: String
         var started: Bool       // true once the session had real activity (a prompt/tool); a merely-opened
@@ -303,6 +304,7 @@ final class StatusController: NSObject, NSMenuDelegate {
             self.entrypoint = surface == "codex-desktop" ? "" : (o["entrypoint"] as? String ?? surface)
             self.termProgram = o["term_program"] as? String ?? ""
             self.pid = Int32(truncatingIfNeeded: (o["pid"] as? NSNumber)?.intValue ?? 0)
+            self.hasTranscript = !(o["transcript"] as? String ?? "").isEmpty
             self.indexedTitle = o["indexedTitle"] as? Bool ?? false
             self.threadSource = o["threadSource"] as? String ?? ""
             self.started = o["started"] as? Bool ?? false
@@ -485,8 +487,10 @@ final class StatusController: NSObject, NSMenuDelegate {
         let completed = eligible.filter { s in
             let eff = s.eff.isEmpty ? effectiveState(s, now: now) : s.eff
             let withinWindow = stalePruneAge == 0 || now - s.ts <= stalePruneAge
-            return !StatusPolicy.shouldShowInMenu(eff) && withinWindow
+            return eff != "unknown" && !StatusPolicy.shouldShowInMenu(eff) && withinWindow
         }.sorted { $0.ts > $1.ts }
+        let unknown = eligible.filter { effectiveState($0, now: now) == "unknown" }
+            .sorted { $0.ts > $1.ts }
         if !active.isEmpty {
             menu.addItem(header("Active"))
             addSessionRows(active, to: menu, now: now)
@@ -495,7 +499,11 @@ final class StatusController: NSObject, NSMenuDelegate {
             menu.addItem(header("Recently completed"))
             addSessionRows(completed, to: menu, now: now)
         }
-        if !active.isEmpty || !completed.isEmpty {
+        if !unknown.isEmpty {
+            menu.addItem(header("Status unavailable"))
+            addSessionRows(unknown, to: menu, now: now)
+        }
+        if !active.isEmpty || !completed.isEmpty || !unknown.isEmpty {
             menu.addItem(.separator())
         }
 
@@ -648,6 +656,7 @@ final class StatusController: NSObject, NSMenuDelegate {
     }
 
     func statusText(_ s: Session, eff: String) -> String {
+        if eff == "unknown" { return "Status unavailable" }
         switch eff {
         case "permission":       return "Awaiting permission"
         case "thinking", "tool", "subagent": return (thinkingWordBySession[s.id] ?? "Thinking") + "…"
@@ -858,11 +867,14 @@ final class StatusController: NSObject, NSMenuDelegate {
         }
         let recentlyCompletedRows = eligible.filter { session in
             let state = session.eff.isEmpty ? effectiveState(session, now: now) : session.eff
-            return !StatusPolicy.shouldShowInMenu(state)
+            return state != "unknown" && !StatusPolicy.shouldShowInMenu(state)
                 && (stalePruneAge == 0 || now - session.ts <= stalePruneAge)
         }
         let health: [String: Any] = [
             "activeTaskCount": activeRows.count,
+            "activeTaskIDs": activeRows.map(\.id).sorted(),
+            "unavailableTaskIDs": eligible.filter { effectiveState($0, now: now) == "unknown" }.map(\.id).sorted(),
+            "liveStatusConnected": taskRegistryMonitor.liveMonitor?.isConnected ?? false,
             "recentlyCompletedTaskCount": recentlyCompletedRows.count,
             "activeOrigins": activeRows.map {
                 StatusPolicy.originTag(entrypoint: $0.entrypoint, termProgram: $0.termProgram)
@@ -933,7 +945,8 @@ final class StatusController: NSObject, NSMenuDelegate {
         for id in Array(sessions.keys) {
             guard var s = sessions[id] else { continue }
             s.eff = effectiveState(s, now: now)   // compute once per tick; the menu + tooltip reuse it
-            let restingExpired = s.eff == "idle" && stalePruneAge > 0 && now - s.ts > stalePruneAge
+            let restingExpired = (s.eff == "idle" && stalePruneAge > 0 && now - s.ts > stalePruneAge)
+                || (s.eff == "unknown" && now - s.ts > StatusPolicy.activeInactivityTimeout)
             if restingExpired {
                 if let path = sessionFilePaths[id] {
                     try? FileManager.default.removeItem(atPath: path)
@@ -1010,6 +1023,14 @@ final class StatusController: NSObject, NSMenuDelegate {
 
     // Per-session effective state with an age cap so a missed event cannot animate forever.
     func effectiveState(_ s: Session, now: Double) -> String {
+        if s.entrypoint.isEmpty && s.termProgram.isEmpty {
+            if !desktopRunning && StatusPolicy.shouldShowInMenu(s.state) { return "unknown" }
+            if desktopRunning, let live = taskRegistryMonitor.liveMonitor?.state(for: s.id) {
+                if live != "unknown" || StatusPolicy.shouldShowInMenu(s.state) { return live }
+            }
+            // A logged start without a transcript or live owner is only provisional evidence.
+            if !s.hasTranscript, StatusPolicy.shouldShowInMenu(s.state), now - s.ts > 15 { return "unknown" }
+        }
         return StatusPolicy.effectiveState(rawState: s.state, age: max(0, now - s.ts))
     }
 
