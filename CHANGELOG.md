@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.5.2 — 2026-09-08
+## 0.5.3 — 2026-09-08
 
 - Follow Codex Desktop runtime status across local, SSH, and Remote Control tasks.
 - Show unconfirmed activity under **Status unavailable**, without an active spinner.
@@ -8,6 +8,7 @@
 - Prevent older producer events from resurrecting completed tasks.
 - Stop treating task catalog updates as completed turns.
 - Include exact active task IDs and live-connection health in local diagnostics.
+- Require signing for published DMGs while allowing ordinary CI development builds.
 
 ## 0.5.1 — 2026-08-30
 

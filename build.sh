@@ -82,7 +82,7 @@ fi
 SIGN_ID="$(printf '%s\n' "$IDENTITIES" | head -1 | sed -E 's/.*"(.*)"/\1/')"
 
 # Tagged GitHub builds are official releases even when the workflow does not set a flag.
-if [[ "${GITHUB_ACTIONS:-}" == "true" && "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+if [[ "${GITHUB_ACTIONS:-}" == "true" && "${GITHUB_REF_TYPE:-}" == "tag" && "${1:-}" == "--dmg" ]]; then
   REQUIRE_SIGNING=1
 fi
 if [[ "${LOCAL_ADHOC:-}" == "1" ]]; then
