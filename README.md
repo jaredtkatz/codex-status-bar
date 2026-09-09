@@ -43,8 +43,8 @@ This is a substantial derivative, not an official successor. Upstream credit doe
 
 ## What it shows
 
-- A monochrome spark that automatically matches the macOS menu bar in light and dark appearances.
-- A subtle spark animation while any task is active; macOS Reduce Motion disables it automatically.
+- A monochrome Codex cloud-terminal logo that automatically matches the macOS menu bar in light and dark appearances.
+- A subtle logo animation while any task is active; macOS Reduce Motion disables it automatically.
 - A rotating Claude-style thinking word while Codex works (`Pondering…`, `Brewing…`, `Tinkering…`).
 - The full elapsed time of the current turn, including thinking and tool use.
 - A yellow indicator when Codex needs permission.
@@ -152,4 +152,4 @@ MIT
 
 ## Trademark / not affiliated
 
-This is an unofficial open-source project. It is not affiliated with, endorsed by, or sponsored by OpenAI or Anthropic. Codex and OpenAI are trademarks of OpenAI. Claude and the Claude spark logo are trademarks of Anthropic. The spark is used in the same nominative, noncommercial spirit as the upstream Claude Status Bar project; the MIT license does not grant trademark rights.
+This is an unofficial open-source project. It is not affiliated with, endorsed by, or sponsored by OpenAI or Anthropic. Codex and OpenAI are trademarks of OpenAI. Claude is a trademark of Anthropic. The MIT license does not grant trademark rights.

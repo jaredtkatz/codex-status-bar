@@ -9,4 +9,4 @@ Nick Mauro's edition removes the pet and CLI-hook systems and rebuilds the produ
 
 Thank you to Mick, Lasse, and every contributor whose work remains in the repository history.
 
-The Claude spark icon and completion sound are carried forward from the original project. Claude and the Claude spark logo are trademarks of Anthropic; their inclusion conveys no affiliation, endorsement, or trademark license. Codex and OpenAI are trademarks of OpenAI; this project is also not affiliated with or endorsed by OpenAI.
+The completion sound is carried forward from the original project. Claude is a trademark of Anthropic; its mention conveys no affiliation, endorsement, or trademark license. Codex and OpenAI are trademarks of OpenAI; this project is also not affiliated with or endorsed by OpenAI.

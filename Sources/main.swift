@@ -1112,7 +1112,7 @@ final class StatusController: NSObject, NSMenuDelegate {
     func animateIconStep() {
         guard let button = statusItem.button else { return }
         button.contentTintColor = nil
-        let frame = animatedSparkFrames[activeIconFrame]
+        let frame = animatedLogoFrames[activeIconFrame]
         button.image = activeIconDotColor.map { dotIcon(base: frame, color: $0) } ?? frame
         activeIconFrame = (activeIconFrame + 1) % StatusPolicy.activeIconFrameCount
     }
@@ -1149,20 +1149,20 @@ final class StatusController: NSObject, NSMenuDelegate {
             ?? NSImage(size: NSSize(width: 18, height: 18))
     }()
 
-    lazy var claudeSparkMark: NSImage? = Data(base64Encoded: claudeLogoPNG).flatMap(NSImage.init(data:))
-    lazy var animatedSparkFrames: [NSImage] = (0..<StatusPolicy.activeIconFrameCount).map {
-        makeAnimatedSparkIcon(frame: $0)
+    lazy var codexLogoMark: NSImage? = Data(base64Encoded: codexLogoPNG).flatMap(NSImage.init(data:))
+    lazy var animatedLogoFrames: [NSImage] = (0..<StatusPolicy.activeIconFrameCount).map {
+        makeAnimatedLogoIcon(frame: $0)
     }
 
     func statusIcon(dotColor: NSColor?) -> NSImage {
-        let frame = claudeSparkIcon()
+        let frame = codexLogoIcon()
         guard let dotColor else { return frame }
         return dotIcon(base: frame, color: dotColor)
     }
 
-    func claudeSparkIcon() -> NSImage {
+    func codexLogoIcon() -> NSImage {
         let side: CGFloat = 20
-        guard let mask = claudeSparkMark else { return fallbackIcon() }
+        guard let mask = codexLogoMark else { return fallbackIcon() }
         let image = NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
             NSColor.black.setFill()
             rect.fill()
@@ -1173,10 +1173,10 @@ final class StatusController: NSObject, NSMenuDelegate {
         return image
     }
 
-    func makeAnimatedSparkIcon(frame: Int) -> NSImage {
+    func makeAnimatedLogoIcon(frame: Int) -> NSImage {
         let side: CGFloat = 20
         let phase = StatusPolicy.activeIconPhase(frame: frame)
-        let base = claudeSparkIcon()
+        let base = codexLogoIcon()
         let image = NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
             NSGraphicsContext.saveGraphicsState()
             let transform = NSAffineTransform()
