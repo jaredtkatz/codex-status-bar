@@ -130,11 +130,17 @@ Move the app to `/Applications` or `~/Applications`, then open it once. It enabl
   This local IPC protocol is versioned but internal to Codex. If a desktop update changes it,
   unsupported live states are unavailable rather than guessed.
 
+## Contributing
+
+PRs are welcome. [Fork this repo](https://github.com/nickxma/codex-status-bar/fork), push your branch to your fork, and open a pull request against `nickxma/codex-status-bar:main`. You don't need collaborator access.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, checks, and instructions if you already have changes ready but can't push a branch.
+
 ## Testing
 
 ```bash
 scripts/test.sh
-swiftc -typecheck Sources/*.swift -framework Cocoa
+swiftc -typecheck Sources/*.swift -framework Cocoa -framework ServiceManagement
 ./build.sh
 ```
 
