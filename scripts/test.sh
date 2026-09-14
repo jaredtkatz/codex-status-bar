@@ -8,3 +8,4 @@ node --check hooks/update.js
 node --check hooks/lifecycle.js
 node --check hooks/install.js
 node Tests/HookTests.js
+bash -n build.sh scripts/dev.sh scripts/dev-relaunch.sh
