@@ -8,3 +8,6 @@ node --check hooks/update.js
 node --check hooks/lifecycle.js
 node --check hooks/install.js
 node Tests/HookTests.js
+for script in build.sh scripts/dev.sh scripts/dev-relaunch.sh; do
+  bash -n "$script"
+done

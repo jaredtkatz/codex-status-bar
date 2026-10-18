@@ -255,6 +255,7 @@ final class StatusController: NSObject, NSMenuDelegate {
     let codexDesktopBundleID = "com.openai.codex"
     let claudeDesktopBundleID = "com.anthropic.claudefordesktop"
     let thinkingWordDefaults = UserDefaults(suiteName: "com.local.claudestatusbar")!
+    let isDevelopmentRun = ProcessInfo.processInfo.environment["CODEX_STATUS_BAR_DEVELOPMENT"] == "1"
 
     var stalePruneAge: TimeInterval {
         if UserDefaults.standard.object(forKey: "hideIdleAfter") != nil {
@@ -385,9 +386,13 @@ final class StatusController: NSObject, NSMenuDelegate {
             self.workspaceObservers.removeAll()
         }
         tick()
-        syncLaunchAtLogin()
+        // The opt-in rebuild loop runs the real app against real local state, but must not replace
+        // an installed copy as the user's login item or repeatedly rewrite Claude hook resources.
+        if !isDevelopmentRun {
+            syncLaunchAtLogin()
+            ensureHooksInstalled()
+        }
         checkForUpdate()
-        ensureHooksInstalled()
     }
 
     var currentVersion: String { (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "0" }
@@ -1220,5 +1225,17 @@ final class StatusController: NSObject, NSMenuDelegate {
 
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
+
+// Shell-launched development builds receive SIGTERM between successful rebuilds. Convert that
+// signal into normal AppKit termination so monitors and child processes get their usual cleanup.
+var developmentTerminationSource: DispatchSourceSignal?
+if ProcessInfo.processInfo.environment["CODEX_STATUS_BAR_DEVELOPMENT"] == "1" {
+    signal(SIGTERM, SIG_IGN)
+    let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+    source.setEventHandler { app.terminate(nil) }
+    source.resume()
+    developmentTerminationSource = source
+}
+
 let controller = StatusController()
 app.run()
